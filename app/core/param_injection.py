@@ -1,42 +1,49 @@
 """
 Parameter Injection Engine — rules-based.
 
+UTM spec:
+  utm_source   = platform bucket (instagram, tiktok, reddit, direct, ...)
+  utm_medium   = "creator" (constant)
+  utm_campaign = destination URL path+query, sanitized for dashboards
+  utm_content  = full referrer URL string, URL-encoded (or empty)
+  inf_click_id = always present
+
 What WE author:
-  1. UTM params → ALWAYS. We control these.
+  1. UTM params → ALWAYS.
   2. Stackfluence click ID (inf_click_id) → ALWAYS.
   3. Mobile attribution params → ONLY when the link has app destinations.
   4. Per-link param_overrides → ALWAYS applied last (brand wins).
 
 What the PLATFORMS author (we just passthrough):
   - fbclid, ttclid, ScCid, gclid, wbraid, gbraid, msclkid, epik, li_fat_id, twclid, rdt_cid
-  We capture these and pass them through. We NEVER generate them.
 """
 
-from urllib.parse import urlencode, urlparse, parse_qs, urlunparse
+from urllib.parse import urlencode, urlparse, parse_qs, urlunparse, quote
 
 
-PLATFORM_UTM = {
-    "instagram":  ("instagram", "social"),
-    "tiktok":     ("tiktok", "social"),
-    "youtube":    ("youtube", "social"),
-    "twitter":    ("twitter", "social"),
-    "facebook":   ("facebook", "social"),
-    "linkedin":   ("linkedin", "social"),
-    "pinterest":  ("pinterest", "social"),
-    "snapchat":   ("snapchat", "social"),
-    "reddit":     ("reddit", "social"),
-    "threads":    ("threads", "social"),
-    "telegram":   ("telegram", "messaging"),
-    "whatsapp":   ("whatsapp", "messaging"),
-    "discord":    ("discord", "messaging"),
-    "google":     ("google", "organic"),
-    "bing":       ("bing", "organic"),
-    "duckduckgo": ("duckduckgo", "organic"),
-    "gmail":      ("gmail", "email"),
-    "outlook":    ("outlook", "email"),
-    "yahoo_mail": ("yahoo_mail", "email"),
-    "linktree":   ("linktree", "referral"),
-    "direct":     ("direct", "none"),
+# Maps source_platform → utm_source value
+PLATFORM_SOURCE = {
+    "instagram":  "instagram",
+    "tiktok":     "tiktok",
+    "youtube":    "youtube",
+    "twitter":    "x",
+    "facebook":   "facebook",
+    "linkedin":   "linkedin",
+    "pinterest":  "pinterest",
+    "snapchat":   "snapchat",
+    "reddit":     "reddit",
+    "threads":    "threads",
+    "telegram":   "telegram",
+    "whatsapp":   "whatsapp",
+    "discord":    "discord",
+    "google":     "google",
+    "bing":       "bing",
+    "duckduckgo": "duckduckgo",
+    "gmail":      "gmail",
+    "outlook":    "outlook",
+    "yahoo_mail": "yahoo_mail",
+    "linktree":   "linktree",
+    "direct":     "direct",
 }
 
 # Platform-injected params we passthrough (not strip, not generate)
@@ -64,13 +71,68 @@ def extract_platform_params(query_params: dict) -> dict:
     return captured
 
 
+def _sanitize_campaign(dest_url: str) -> str:
+    """
+    Build utm_campaign from destination URL "after host".
+    path + query, sanitized for dashboards.
+
+    Transform:
+      / → _
+      ? → ~
+      & → __
+      = → -
+    Then collapse repeated underscores and trim to 180 chars.
+    """
+    parsed = urlparse(dest_url)
+
+    # Build raw campaign: path + query
+    campaign_raw = parsed.path or ""
+    if parsed.query:
+        campaign_raw += "?" + parsed.query
+
+    # Remove leading slash
+    campaign_raw = campaign_raw.lstrip("/")
+
+    if not campaign_raw:
+        return "home"
+
+    # Sanitize for dashboards (human-readable approach)
+    sanitized = campaign_raw
+    sanitized = sanitized.replace("/", "_")
+    sanitized = sanitized.replace("?", "~")
+    sanitized = sanitized.replace("&", "__")
+    sanitized = sanitized.replace("=", "-")
+
+    # Collapse repeated underscores
+    while "__" in sanitized:
+        old = sanitized
+        sanitized = sanitized.replace("___", "__")
+        if sanitized == old:
+            break
+
+    # Trim to 180 chars
+    if len(sanitized) > 180:
+        sanitized = sanitized[:180]
+
+    return sanitized
+
+
+def _encode_referrer(referrer: str | None) -> str:
+    """URL-encode the full referrer string for utm_content."""
+    if not referrer:
+        return ""
+    # Cap at 500 chars before encoding to avoid URL length issues
+    capped = referrer[:500]
+    return quote(capped, safe="")
+
+
 def build_tracking_params(
     click_id: str,
     source_platform: str,
-    source_medium: str,
-    source_detail: str | None,
-    creator_handle: str,
-    campaign_slug: str,
+    dest_url: str,
+    referrer: str | None = None,
+    creator_handle: str = "",
+    campaign_slug: str = "",
     asset_slug: str | None = None,
     param_overrides: dict | None = None,
     has_app_destination: bool = False,
@@ -81,18 +143,24 @@ def build_tracking_params(
     # ═══════════════════════════════════════════════════════════
     # RULE 1: UTM params — ALWAYS (we author these)
     # ═══════════════════════════════════════════════════════════
-    utm_source, utm_medium = PLATFORM_UTM.get(
+
+    # utm_source = platform bucket
+    utm_source = PLATFORM_SOURCE.get(
         source_platform,
-        (source_platform or "unknown", source_medium or "referral")
+        source_platform or "unknown"
     )
     params["utm_source"] = utm_source
-    params["utm_medium"] = utm_medium
-    params["utm_campaign"] = campaign_slug
-    params["utm_content"] = creator_handle
-    if source_detail:
-        params["utm_term"] = source_detail
-    if asset_slug:
-        params["utm_content"] = f"{creator_handle}_{asset_slug}"
+
+    # utm_medium = "creator" (constant)
+    params["utm_medium"] = "creator"
+
+    # utm_campaign = sanitized destination path+query
+    params["utm_campaign"] = _sanitize_campaign(dest_url)
+
+    # utm_content = full referrer URL, encoded (or empty)
+    encoded_ref = _encode_referrer(referrer)
+    if encoded_ref:
+        params["utm_content"] = encoded_ref
 
     # ═══════════════════════════════════════════════════════════
     # RULE 2: Stackfluence click ID — ALWAYS
@@ -114,7 +182,7 @@ def build_tracking_params(
         params["c"] = campaign_slug
         params["af_sub1"] = creator_handle
         params["af_sub2"] = click_id
-        params["af_sub3"] = source_detail or ""
+        params["af_sub3"] = ""
 
         # Branch.io
         params["~channel"] = source_platform
@@ -142,12 +210,22 @@ def build_tracking_params(
     return params
 
 
-def inject_params_to_url(url: str, params: dict) -> str:
-    """Append tracking parameters to a URL. New params override existing."""
+def inject_params_to_url(url: str, params: dict, policy: str = "only_if_missing") -> str:
+    """
+    Append tracking parameters to a URL.
+
+    policy:
+      "only_if_missing" — don't overwrite existing UTMs (recommended)
+      "always_override" — our params win
+    """
     parsed = urlparse(url)
     existing = parse_qs(parsed.query, keep_blank_values=True)
+
     for key, value in params.items():
+        if policy == "only_if_missing" and key in existing:
+            continue
         existing[key] = [str(value)]
+
     new_query = urlencode(existing, doseq=True)
     return urlunparse(parsed._replace(query=new_query))
 
@@ -161,6 +239,7 @@ def resolve_destination(
     is_mobile: bool,
     os_family: str | None,
     platform_params: dict | None = None,
+    referrer: str | None = None,
 ) -> tuple[str, dict]:
     """Determine final destination URL. Returns (final_url, injected_params)."""
     has_app_destination = bool(
@@ -172,8 +251,8 @@ def resolve_destination(
     params = build_tracking_params(
         click_id=click_id,
         source_platform=source_platform,
-        source_medium=source_medium,
-        source_detail=source_detail,
+        dest_url=link.destination_url,
+        referrer=referrer,
         creator_handle=link.creator_handle,
         campaign_slug=link.campaign_slug,
         asset_slug=link.asset_slug,
@@ -213,5 +292,6 @@ def resolve_destination(
                     base_url = link.android_fallback_url
                     params["android_deeplink"] = deep_url
 
-    final_url = inject_params_to_url(base_url, params)
+    # Use "only_if_missing" policy — don't overwrite advertiser's existing UTMs
+    final_url = inject_params_to_url(base_url, params, policy="only_if_missing")
     return final_url, params

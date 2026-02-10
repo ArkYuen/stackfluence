@@ -182,6 +182,7 @@ async def redirect_click(
         is_mobile=intel.is_mobile,
         os_family=intel.os_family,
         platform_params=platform_params,
+        referrer=referer,
     )
 
     # Extract UTM subset
