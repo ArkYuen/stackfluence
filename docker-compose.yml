@@ -1,0 +1,38 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: stackfluence
+      POSTGRES_USER: stackfluence
+      POSTGRES_PASSWORD: stackfluence
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      SF_DATABASE_URL: postgresql+asyncpg://stackfluence:stackfluence@db:5432/stackfluence
+      SF_REDIS_URL: redis://redis:6379/0
+      SF_CLICK_ID_SECRET: change-me-in-production
+      SF_DEBUG: "true"
+      SF_BASE_URL: http://localhost:8000
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - .:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  pgdata:
