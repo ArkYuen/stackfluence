@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.redirect import router as redirect_router
 from app.api.events import router as events_router
 from app.api.quick_link import router as quick_link_router
+from app.api.admin import router as admin_router
 from app.middleware.security import SecurityHeadersMiddleware
 from app.config import get_settings
 
@@ -66,6 +67,7 @@ app.add_middleware(
 app.include_router(redirect_router)
 app.include_router(events_router)
 app.include_router(quick_link_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")
