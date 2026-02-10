@@ -9,7 +9,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.redirect import router as redirect_router
+from app.api.collector import router as collector_router
 from app.api.events import router as events_router
+from app.api.links import router as links_router
 from app.api.quick_link import router as quick_link_router
 from app.api.admin import router as admin_router
 from app.middleware.security import SecurityHeadersMiddleware
@@ -38,9 +40,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Stackfluence",
     description="Influencer measurement infrastructure — from click to conversion, cleanly.",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
-    # Don't expose /docs in production — only enable with SF_DEBUG=true
     docs_url="/docs" if get_settings().debug else None,
     redoc_url="/redoc" if get_settings().debug else None,
     openapi_url="/openapi.json" if get_settings().debug else None,
@@ -65,11 +66,13 @@ app.add_middleware(
 
 # --- Routes ---
 app.include_router(redirect_router)
+app.include_router(collector_router)
 app.include_router(events_router)
+app.include_router(links_router)
 app.include_router(quick_link_router)
 app.include_router(admin_router)
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "stackfluence"}
+    return {"status": "ok", "service": "stackfluence", "version": "0.2.0"}

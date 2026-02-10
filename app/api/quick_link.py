@@ -3,24 +3,11 @@ Quick link creation — the simple advertiser-facing endpoint.
 
 POST /v1/links/quick
 
-Input:
-  {
-    "destination_url": "https://mybrand.com/summer-collection",
-    "creator": "emma",
-    "campaign": "summer-drop"
-  }
-
-Output:
-  {
-    "wrapper_url": "https://stackfluence.com/c/emma/summer-drop",
-    "destination_url": "https://mybrand.com/summer-collection",
-    "creator": "emma",
-    "campaign": "summer-drop",
-    "status": "active"
-  }
-
-The API key identifies the org. Creator and campaign records are
-auto-created if they don't exist. No UUIDs, no complexity.
+Supports:
+  - Basic web links (destination_url)
+  - Deep links for app installs (ios_deeplink, android_deeplink, etc.)
+  - Custom param overrides (utm_source, fbclid, any custom params)
+  - Everything auto-creates if it doesn't exist
 """
 
 import re
@@ -49,7 +36,19 @@ class QuickLinkRequest(BaseModel):
     destination_url: str
     creator: str
     campaign: str
-    asset: str | None = None  # optional sub-asset
+    asset: str | None = None
+
+    # Deep linking (optional)
+    ios_deeplink: str | None = None          # e.g. myapp://product/123
+    ios_fallback_url: str | None = None       # App Store URL
+    android_deeplink: str | None = None       # e.g. myapp://product/123
+    android_fallback_url: str | None = None   # Play Store URL
+    universal_link: str | None = None         # Apple Universal Link / Android App Link
+
+    # Custom parameter overrides (optional)
+    # These override auto-generated UTM/tracking params
+    # Example: {"utm_source": "custom", "my_param": "value", "fbclid": "abc123"}
+    param_overrides: dict | None = None
 
 
 class QuickLinkResponse(BaseModel):
@@ -58,22 +57,22 @@ class QuickLinkResponse(BaseModel):
     creator: str
     campaign: str
     asset: str | None = None
+    has_deep_links: bool = False
+    param_overrides: dict | None = None
     status: str
 
 
 # --- Helpers ---
 
 def _slugify(text: str) -> str:
-    """Turn user input into a URL-safe slug."""
     text = text.lower().strip()
-    text = re.sub(r"[^a-z0-9\-_]", "-", text)  # replace non-alphanumeric
-    text = re.sub(r"-+", "-", text)  # collapse multiple dashes
+    text = re.sub(r"[^a-z0-9\-_]", "-", text)
+    text = re.sub(r"-+", "-", text)
     text = text.strip("-")
     return text
 
 
 def _validate_destination_url(url: str):
-    """Prevent open redirect attacks."""
     if not url.startswith(("https://", "http://")):
         raise HTTPException(status_code=400, detail="destination_url must start with https:// or http://")
     blocked = ["localhost", "127.0.0.1", "0.0.0.0", "169.254.", "10.", "192.168.", "172.16."]
@@ -91,15 +90,9 @@ async def create_quick_link(
     auth: AuthContext = Depends(require_secret_key),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a tracked link with just a URL, creator name, and campaign name.
-
-    Auto-creates creator and campaign records if they don't exist.
-    The API key determines which organization the link belongs to.
-    """
     rate_limit_api_key(str(auth.key_id))
     settings = get_settings()
 
-    # Validate
     _validate_destination_url(req.destination_url)
 
     creator_handle = _slugify(req.creator)
@@ -117,10 +110,7 @@ async def create_quick_link(
     creator = result.scalar_one_or_none()
 
     if not creator:
-        creator = Creator(
-            handle=creator_handle,
-            display_name=req.creator.strip(),  # preserve original casing for display
-        )
+        creator = Creator(handle=creator_handle, display_name=req.creator.strip())
         db.add(creator)
         await db.flush()
         logger.info("creator_auto_created", handle=creator_handle)
@@ -136,7 +126,7 @@ async def create_quick_link(
     if not campaign:
         campaign = Campaign(
             organization_id=auth.organization_id,
-            name=req.campaign.strip(),  # preserve original casing
+            name=req.campaign.strip(),
             slug=campaign_slug,
         )
         db.add(campaign)
@@ -153,7 +143,6 @@ async def create_quick_link(
     existing = result.scalar_one_or_none()
 
     if existing:
-        # Link already exists — return it (idempotent)
         path = f"/c/{creator_handle}/{campaign_slug}"
         if asset_slug:
             path += f"/{asset_slug}"
@@ -164,6 +153,8 @@ async def create_quick_link(
             creator=creator_handle,
             campaign=campaign_slug,
             asset=asset_slug,
+            has_deep_links=bool(existing.ios_deeplink or existing.android_deeplink or existing.universal_link),
+            param_overrides=existing.param_overrides,
             status=existing.status,
         )
 
@@ -176,6 +167,12 @@ async def create_quick_link(
         campaign_slug=campaign_slug,
         asset_slug=asset_slug,
         destination_url=req.destination_url.strip(),
+        ios_deeplink=req.ios_deeplink,
+        ios_fallback_url=req.ios_fallback_url,
+        android_deeplink=req.android_deeplink,
+        android_fallback_url=req.android_fallback_url,
+        universal_link=req.universal_link,
+        param_overrides=req.param_overrides,
     )
     db.add(link)
     await db.commit()
@@ -186,7 +183,8 @@ async def create_quick_link(
     wrapper_url = f"{settings.base_url}{path}"
 
     logger.info("quick_link_created", wrapper_url=wrapper_url, creator=creator_handle,
-                campaign=campaign_slug, org=str(auth.organization_id))
+                campaign=campaign_slug, org=str(auth.organization_id),
+                deep_links=bool(req.ios_deeplink or req.android_deeplink))
 
     return QuickLinkResponse(
         wrapper_url=wrapper_url,
@@ -194,5 +192,7 @@ async def create_quick_link(
         creator=creator_handle,
         campaign=campaign_slug,
         asset=asset_slug,
+        has_deep_links=bool(req.ios_deeplink or req.android_deeplink or req.universal_link),
+        param_overrides=req.param_overrides,
         status="active",
     )
