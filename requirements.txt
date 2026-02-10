@@ -10,3 +10,4 @@ redis[hiredis]==5.2.1
 user-agents==2.2.0
 python-dotenv==1.0.1
 structlog==24.4.0
+psycopg2-binary==2.9.11
