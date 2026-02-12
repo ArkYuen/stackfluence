@@ -18,7 +18,7 @@ What the PLATFORMS author (we just passthrough):
   - fbclid, ttclid, ScCid, gclid, wbraid, gbraid, msclkid, epik, li_fat_id, twclid, rdt_cid
 """
 
-from urllib.parse import urlencode, urlparse, parse_qs, urlunparse, quote
+from urllib.parse import urlencode, urlparse, parse_qs, urlunparse
 
 
 # Maps source_platform → utm_source value
@@ -118,12 +118,11 @@ def _sanitize_campaign(dest_url: str) -> str:
 
 
 def _encode_referrer(referrer: str | None) -> str:
-    """URL-encode the full referrer string for utm_content."""
+    """Return the raw referrer string for utm_content (encoding handled by urlencode later)."""
     if not referrer:
         return ""
-    # Cap at 500 chars before encoding to avoid URL length issues
-    capped = referrer[:500]
-    return quote(capped, safe="")
+    # Cap at 500 chars to avoid URL length issues
+    return referrer[:500]
 
 
 def build_tracking_params(

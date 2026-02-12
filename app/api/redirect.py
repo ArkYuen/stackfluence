@@ -340,14 +340,15 @@ async def redirect_click(
         collector_url = f"{settings.base_url}/r/{click_id}"
         response = RedirectResponse(url=collector_url, status_code=302)
 
-    # Click ID cookie (7 days — brand's site can read for attribution)
+    # Click ID cookie (7 days)
+    is_secure = not settings.debug
     response.set_cookie(
         key="inf_click_id",
         value=str(click_id),
         max_age=604800,
         path="/",
         samesite="lax",
-        secure=True,
+        secure=is_secure,
         httponly=True,
     )
 
@@ -359,7 +360,7 @@ async def redirect_click(
             max_age=2592000,     # 30 days
             path="/",
             samesite="lax",
-            secure=True,
+            secure=is_secure,
             httponly=True,
         )
 

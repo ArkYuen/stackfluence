@@ -81,9 +81,24 @@ def check_dedupe(ip: str, slug: str, ua: str, window_seconds: int = 3) -> bool:
     return False
 
 
+def _get_real_ip(request: Request) -> str:
+    """Extract real client IP from x-forwarded-for or request."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        ips = [ip.strip() for ip in forwarded.split(",")]
+        for ip in ips:
+            if not ip.startswith(("10.", "172.16.", "172.17.", "172.18.", "172.19.",
+                                  "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
+                                  "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
+                                  "172.30.", "172.31.", "192.168.", "127.", "::1")):
+                return ip
+        return ips[0]
+    return request.client.host if request.client else "unknown"
+
+
 def rate_limit_ip(request: Request, limit: int | None = None):
     settings = get_settings()
-    ip = request.client.host if request.client else "unknown"
+    ip = _get_real_ip(request)
     return check_rate_limit(
         f"ip:{ip}",
         limit or settings.rate_limit_per_ip_per_minute,
@@ -91,7 +106,7 @@ def rate_limit_ip(request: Request, limit: int | None = None):
 
 
 def rate_limit_link(request: Request, creator: str, campaign: str):
-    ip = request.client.host if request.client else "unknown"
+    ip = _get_real_ip(request)
     return check_rate_limit(
         f"link:{ip}:{creator}:{campaign}",
         10,

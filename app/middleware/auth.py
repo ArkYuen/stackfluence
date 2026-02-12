@@ -96,7 +96,10 @@ async def require_auth(
     db: AsyncSession = Depends(get_db),
 ) -> AuthContext:
     if not api_key:
-        api_key = request.query_params.get("key")
+        # Only allow publishable keys via query param (for sendBeacon)
+        qkey = request.query_params.get("key")
+        if qkey and qkey.startswith("sf_pub_"):
+            api_key = qkey
     return await _resolve_key(api_key, db)
 
 
@@ -105,8 +108,7 @@ async def require_secret_key(
     api_key: str | None = Security(api_key_header),
     db: AsyncSession = Depends(get_db),
 ) -> AuthContext:
-    if not api_key:
-        api_key = request.query_params.get("key")
+    # Secret keys must come via header only — never query param
     auth = await _resolve_key(api_key, db)
     if auth.key_type != "secret":
         raise HTTPException(

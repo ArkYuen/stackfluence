@@ -3,7 +3,8 @@ One-time admin bootstrap endpoint.
 Handles retries gracefully — won't fail if org already exists.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,15 +19,22 @@ logger = structlog.get_logger()
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-@router.get("/bootstrap")
+class BootstrapRequest(BaseModel):
+    org_name: str
+    setup_key: str
+
+
+@router.post("/bootstrap")
 async def bootstrap(
-    org_name: str = Query(..., description="Your organization name"),
-    setup_key: str = Query(..., description="Must match SF_CLICK_ID_SECRET"),
+    body: BootstrapRequest,
     db: AsyncSession = Depends(get_db),
 ):
     settings = get_settings()
 
-    if setup_key != settings.click_id_secret:
+    if not settings.debug:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if body.setup_key != settings.click_id_secret:
         raise HTTPException(status_code=403, detail="Invalid setup key")
 
     # Fix column size if needed (safe to run multiple times)
@@ -37,13 +45,13 @@ async def bootstrap(
         await db.rollback()
 
     # Find or create org
-    org_slug = org_name.lower().replace(" ", "-").replace("_", "-")
+    org_slug = body.org_name.lower().replace(" ", "-").replace("_", "-")
     stmt = select(Organization).where(Organization.slug == org_slug)
     result = await db.execute(stmt)
     org = result.scalar_one_or_none()
 
     if not org:
-        org = Organization(name=org_name, slug=org_slug)
+        org = Organization(name=body.org_name, slug=org_slug)
         db.add(org)
         await db.flush()
 
@@ -55,7 +63,7 @@ async def bootstrap(
     if existing_keys:
         return {
             "message": "Organization already has API keys. Create a new org name to get new keys.",
-            "organization": {"id": str(org.id), "name": org_name, "slug": org_slug},
+            "organization": {"id": str(org.id), "name": body.org_name, "slug": org_slug},
         }
 
     # Generate keys
@@ -81,7 +89,7 @@ async def bootstrap(
 
     return {
         "message": "SAVE THESE KEYS — they won't be shown again.",
-        "organization": {"id": str(org.id), "name": org_name, "slug": org_slug},
+        "organization": {"id": str(org.id), "name": body.org_name, "slug": org_slug},
         "secret_key": raw_secret,
         "publishable_key": raw_pub,
     }
