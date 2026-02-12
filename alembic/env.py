@@ -7,6 +7,7 @@ from alembic import context
 
 from app.models.tables import Base
 from app.middleware.auth import APIKey
+from app.middleware.supabase_auth import User
 from app.config import get_settings
 
 config = context.config

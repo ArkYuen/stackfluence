@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     rate_limit_per_ip_per_minute: int = 30
     rate_limit_per_link_per_minute: int = 120
 
+    # --- Supabase ---
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+
     # --- Billing defaults ---
     default_dedupe_window_seconds: int = 1800  # 30 min
     default_min_engagement_seconds: int = 10
