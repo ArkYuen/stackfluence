@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     rate_limit_per_ip_per_minute: int = 30
     rate_limit_per_link_per_minute: int = 120
 
+    # --- Shopify ---
+    shopify_api_version: str = "2024-01"
+
     # --- Supabase ---
     supabase_url: str = ""
     supabase_anon_key: str = ""

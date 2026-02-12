@@ -117,6 +117,19 @@ class Link(Base):
     )
 
 
+class ShopifyStore(Base):
+    __tablename__ = "shopify_stores"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    shop_domain = Column(String(255), nullable=False, unique=True, index=True)
+    access_token_encrypted = Column(Text, nullable=False)
+    webhook_secret = Column(String(255), nullable=False)
+    is_active = Column(Boolean, default=True)
+    installed_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 # ---------------------------------------------------------------------------
 # Event tables (append-only)
 # ---------------------------------------------------------------------------
