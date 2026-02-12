@@ -17,7 +17,6 @@ from app.api.links import router as links_router
 from app.api.quick_link import router as quick_link_router
 from app.api.admin import router as admin_router
 from app.api.dashboard import router as dashboard_router
-from app.api.shopify import router as shopify_router
 from app.middleware.security import SecurityHeadersMiddleware
 from app.config import get_settings
 
@@ -78,7 +77,6 @@ app.include_router(links_router)
 app.include_router(quick_link_router)
 app.include_router(admin_router)
 app.include_router(dashboard_router)
-app.include_router(shopify_router)
 
 # --- Static files ---
 _static_dir = Path(__file__).resolve().parent.parent / "static"

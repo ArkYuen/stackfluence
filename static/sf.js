@@ -20,26 +20,11 @@
     script?.getAttribute("data-endpoint") || "https://api.stackfluence.com";
   var CLICK_ID_PARAM = "inf_click_id";
   var STORAGE_KEY = "sf_click_id";
-  var IS_SHOPIFY = typeof window.Shopify !== "undefined";
 
   if (!API_KEY) {
     console.warn("[Stackfluence] Missing data-key attribute. Events will not be sent.");
     return;
   }
-
-  // Shopify: use localStorage (survives cross-domain checkout redirect)
-  // Non-Shopify: use sessionStorage (scoped to tab, no cross-site leakage)
-  var storage = (function () {
-    var store = IS_SHOPIFY ? window.localStorage : window.sessionStorage;
-    return {
-      get: function (key) {
-        try { return store.getItem(key); } catch (e) { return null; }
-      },
-      set: function (key, val) {
-        try { store.setItem(key, val); } catch (e) {}
-      },
-    };
-  })();
 
   function getParam(name) {
     var params = new URLSearchParams(window.location.search);
@@ -49,24 +34,16 @@
   function getClickId() {
     var fromUrl = getParam(CLICK_ID_PARAM);
     if (fromUrl) {
-      storage.set(STORAGE_KEY, fromUrl);
+      try {
+        sessionStorage.setItem(STORAGE_KEY, fromUrl);
+      } catch (e) {}
       return fromUrl;
     }
-    return storage.get(STORAGE_KEY);
-  }
-
-  // Shopify: inject click_id into cart attributes so it survives checkout
-  function injectCartAttribute(clickId) {
-    if (!IS_SHOPIFY || !clickId) return;
     try {
-      fetch("/cart/update.js", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          attributes: { inf_click_id: clickId },
-        }),
-      }).catch(function () {});
-    } catch (e) {}
+      return sessionStorage.getItem(STORAGE_KEY);
+    } catch (e) {
+      return null;
+    }
   }
 
   function sendEvent(path, data) {
@@ -104,9 +81,6 @@
   // Auto-fire on page load if click_id present
   var clickId = getClickId();
   if (clickId) {
-    // Shopify: inject click_id into cart attributes for checkout survival
-    injectCartAttribute(clickId);
-
     sendEvent("/v1/events/session", {
       page_url: window.location.href,
       referrer: document.referrer || null,
