@@ -4,8 +4,8 @@ Parameter Injection Engine — rules-based.
 UTM spec:
   utm_source   = platform bucket (instagram, tiktok, reddit, direct, ...)
   utm_medium   = "creator" (constant)
-  utm_campaign = destination URL path+query, sanitized for dashboards
-  utm_content  = full referrer URL string, URL-encoded (or empty)
+  utm_campaign = full referrer URL (or Sec-Fetch-Site bucket, or omitted)
+  utm_content  = destination URL path+query, sanitized for dashboards
   inf_click_id = always present
 
 What WE author:
@@ -136,6 +136,7 @@ def build_tracking_params(
     param_overrides: dict | None = None,
     has_app_destination: bool = False,
     platform_params: dict | None = None,
+    request_headers: dict | None = None,
 ) -> dict:
     params = {}
 
@@ -153,13 +154,17 @@ def build_tracking_params(
     # utm_medium = "creator" (constant)
     params["utm_medium"] = "creator"
 
-    # utm_campaign = sanitized destination path+query
-    params["utm_campaign"] = _sanitize_campaign(dest_url)
+    # content = sanitized destination path (+query)
+    params["utm_content"] = _sanitize_campaign(dest_url)
 
-    # utm_content = full referrer URL, encoded (or empty)
-    encoded_ref = _encode_referrer(referrer)
-    if encoded_ref:
-        params["utm_content"] = encoded_ref
+    # campaign = full referrer URL if present; else Sec-Fetch-Site bucket; else omit
+    if referrer:
+        params["utm_campaign"] = _encode_referrer(referrer)
+    else:
+        sec_fetch_site = (request_headers or {}).get("sec-fetch-site") or (request_headers or {}).get("Sec-Fetch-Site")
+        if sec_fetch_site:
+            params["utm_campaign"] = sec_fetch_site.lower()  # "cross-site" / "same-site" / "same-origin" / "none"
+        # else: do not set utm_campaign
 
     # ═══════════════════════════════════════════════════════════
     # RULE 2: Stackfluence click ID — ALWAYS
@@ -239,6 +244,7 @@ def resolve_destination(
     os_family: str | None,
     platform_params: dict | None = None,
     referrer: str | None = None,
+    request_headers: dict | None = None,
 ) -> tuple[str, dict]:
     """Determine final destination URL. Returns (final_url, injected_params)."""
     has_app_destination = bool(
@@ -258,6 +264,7 @@ def resolve_destination(
         param_overrides=link.param_overrides,
         has_app_destination=has_app_destination,
         platform_params=platform_params,
+        request_headers=request_headers,
     )
 
     base_url = link.destination_url
