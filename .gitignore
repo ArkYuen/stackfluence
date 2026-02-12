@@ -4,3 +4,4 @@ __pycache__/
 .env
 alembic/versions/*.pyc
 FRONTEND_GUIDE.md
+BOT_DETECTION_UPGRADES.md
