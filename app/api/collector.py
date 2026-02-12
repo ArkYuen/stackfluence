@@ -117,17 +117,39 @@ async def collector_hop(
     data.languages = navigator.languages ? Array.from(navigator.languages) : null;
   }} catch(e) {{}}
 
-  // 7. Connection
+  // 7. Connection (full details)
   try {{
     if (navigator.connection) {{
       data.connection_type = navigator.connection.effectiveType;
+      data.connection_rtt = navigator.connection.rtt;
+      data.connection_downlink = navigator.connection.downlink;
+      data.connection_save_data = navigator.connection.saveData;
     }}
   }} catch(e) {{}}
 
   // 8. Touch capability
   try {{ data.max_touch_points = navigator.maxTouchPoints; }} catch(e) {{}}
 
-  // 9. Timing — how long collector JS took (bots often don't execute JS at all)
+  // 9. Browser capabilities
+  try {{ data.cookie_enabled = navigator.cookieEnabled; }} catch(e) {{}}
+  try {{ data.hardware_concurrency = navigator.hardwareConcurrency; }} catch(e) {{}}
+  try {{ data.device_memory = navigator.deviceMemory; }} catch(e) {{}}
+  try {{
+    data.localStorage_ok = typeof localStorage !== 'undefined';
+    data.sessionStorage_ok = typeof sessionStorage !== 'undefined';
+    data.indexedDB_ok = typeof indexedDB !== 'undefined';
+  }} catch(e) {{}}
+
+  // 10. Viewport
+  try {{
+    data.viewport_width = window.innerWidth;
+    data.viewport_height = window.innerHeight;
+  }} catch(e) {{}}
+
+  // 11. Visibility state
+  try {{ data.visibility_state = document.visibilityState; }} catch(e) {{}}
+
+  // 12. Timing — how long collector JS took (bots often don't execute JS at all)
   data.collector_js_time_ms = Date.now() - t0;
 
   // Send telemetry (fire and forget with keepalive)
@@ -197,14 +219,20 @@ async def collect_telemetry(
         "ua_brands", "ua_platform", "ua_mobile",
         "ua_platform_version", "ua_full_version", "ua_model",
         "ua_arch", "ua_bitness", "ua_full_version_list",
-        # Screen
+        # Screen + viewport
         "screen_width", "screen_height", "device_pixel_ratio",
+        "viewport_width", "viewport_height",
         # Locale
         "timezone", "language", "languages",
-        # Connection
-        "connection_type",
+        # Connection (full)
+        "connection_type", "connection_rtt", "connection_downlink", "connection_save_data",
         # Touch
         "max_touch_points",
+        # Browser capabilities
+        "cookie_enabled", "hardware_concurrency", "device_memory",
+        "localStorage_ok", "sessionStorage_ok", "indexedDB_ok",
+        # Visibility
+        "visibility_state",
         # Timing
         "collector_js_time_ms",
     ]:

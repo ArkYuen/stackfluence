@@ -24,6 +24,7 @@ Flow:
      Otherwise → 302 to /r/{click_id} (collector hop)
 """
 
+import hashlib
 import time
 import uuid
 from datetime import datetime, timezone
@@ -283,6 +284,19 @@ async def redirect_click(
             "sec_fetch_mode": sec_fetch_mode,
             "sec_fetch_dest": sec_fetch_dest,
             "sec_fetch_user": sec_fetch_user,
+            # Privacy signals
+            "dnt": request.headers.get("dnt"),
+            "sec_gpc": request.headers.get("sec-gpc"),
+            # Request metadata
+            "accept": request.headers.get("accept"),
+            "accept_encoding": request.headers.get("accept-encoding"),
+            # Low-entropy client hints (server-side)
+            "sec_ch_ua": request.headers.get("sec-ch-ua"),
+            "sec_ch_ua_mobile": request.headers.get("sec-ch-ua-mobile"),
+            "sec_ch_ua_platform": request.headers.get("sec-ch-ua-platform"),
+            # IP derivatives (for long-term storage after raw IP is purged)
+            "ip_hash": hashlib.sha256(f"stackfluence:{ip}".encode()).hexdigest(),
+            "ip_prefix": ".".join(ip.split(".")[:3]) + ".0" if "." in ip else None,
         },
 
         # Timing
