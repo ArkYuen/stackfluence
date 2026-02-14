@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wrpper Logo</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@900&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #f5f4f0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .logo .icon {
+    width: 100px;
+    height: 100px;
+    background: #0b0707;
+    border-radius: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  .logo .icon::after {
+    content: '';
+    position: absolute;
+    bottom: -5px;
+    right: -5px;
+    width: 26px;
+    height: 26px;
+    background: #fe5b25;
+    border-radius: 50%;
+    border: 4px solid #f5f4f0;
+  }
+  .logo .icon svg { width: 54px; height: 54px; }
+  .logo .wordmark {
+    font-size: 80px;
+    font-weight: 900;
+    color: #0b0707;
+    letter-spacing: -4.5px;
+  }
+</style>
+</head>
+<body>
+  <div class="logo">
+    <div class="icon">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M10 6L6 12l4 6" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M14 6l4 6-4 6" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <span class="wordmark">wrpper</span>
+  </div>
+</body>
+</html>
