@@ -235,6 +235,33 @@ class ClickEvent(Base):
     click_number = Column(Integer, default=1)                # nth click in this session
     redirect_latency_ms = Column(Integer, nullable=True)     # server redirect → collector hop. Bots are instant
 
+    # --- Device fingerprinting (from client JS) ---
+    webgl_renderer = Column(String(255), nullable=True)      # GPU string — bots return "SwiftShader" or null
+    canvas_fingerprint = Column(String(64), nullable=True)   # hash of canvas draw — unique per device/browser
+    audio_fingerprint = Column(String(64), nullable=True)    # AudioContext fingerprint
+    installed_fonts_hash = Column(String(64), nullable=True) # hash of detected fonts
+    pdf_viewer_enabled = Column(Boolean, nullable=True)      # headless browsers often lack this
+    battery_charging = Column(Boolean, nullable=True)        # bots usually report true
+    battery_level = Column(Float, nullable=True)             # bots usually report 1.0
+
+    # --- Page load performance (from client JS) ---
+    perf_dns_ms = Column(Integer, nullable=True)             # DNS lookup time
+    perf_tcp_ms = Column(Integer, nullable=True)             # TCP connect time
+    perf_tls_ms = Column(Integer, nullable=True)             # TLS handshake time
+    perf_ttfb_ms = Column(Integer, nullable=True)            # time to first byte
+    perf_load_ms = Column(Integer, nullable=True)            # full page load time
+
+    # --- Server-side headers (captured at redirect) ---
+    accept_language_full = Column(Text, nullable=True)       # full Accept-Language header
+    header_order = Column(Text, nullable=True)               # order of HTTP headers — unique per browser
+
+    # --- IP enrichment (async lookup) ---
+    is_vpn = Column(Boolean, nullable=True)
+    is_tor = Column(Boolean, nullable=True)
+    is_residential = Column(Boolean, nullable=True)          # residential vs datacenter
+    ip_reputation_score = Column(Float, nullable=True)       # from IP reputation service
+    ip_company_name = Column(String(255), nullable=True)     # reverse IP to company
+
     # --- Bot / fraud ---
     risk_score = Column(Float, default=0.0)
     bot_blocked = Column(Boolean, default=False)

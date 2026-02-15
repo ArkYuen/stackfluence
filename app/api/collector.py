@@ -153,7 +153,7 @@ async def collector_hop(
   // 12. Do Not Track
   try {{ data.do_not_track = navigator.doNotTrack === '1' || window.doNotTrack === '1'; }} catch(e) {{}}
 
-  // 13. Ad blocker detection (try to load a bait element)
+  // 13. Ad blocker detection
   try {{
     var bait = document.createElement('div');
     bait.className = 'ad-banner ads adsbox ad-placement';
@@ -163,7 +163,130 @@ async def collector_hop(
     document.body.removeChild(bait);
   }} catch(e) {{ data.ad_blocker_detected = null; }}
 
-  // 14. Timing — how long collector JS took (bots often don't execute JS at all)
+  // 14. PDF viewer
+  try {{ data.pdf_viewer_enabled = navigator.pdfViewerEnabled; }} catch(e) {{}}
+
+  // 15. WebGL renderer (GPU fingerprint — strongest bot signal)
+  try {{
+    var c = document.createElement('canvas');
+    var gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+    if (gl) {{
+      var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      if (dbg) {{
+        data.webgl_renderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
+        data.webgl_vendor = gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL);
+      }}
+    }}
+  }} catch(e) {{}}
+
+  // 16. Canvas fingerprint (hash of drawn canvas — unique per device)
+  try {{
+    var cv = document.createElement('canvas');
+    cv.width = 200; cv.height = 50;
+    var ctx = cv.getContext('2d');
+    ctx.textBaseline = 'top';
+    ctx.font = '14px Arial';
+    ctx.fillStyle = '#f60';
+    ctx.fillRect(125, 1, 62, 20);
+    ctx.fillStyle = '#069';
+    ctx.fillText('Cwm fjord bank', 2, 15);
+    ctx.fillStyle = 'rgba(102,204,0,0.7)';
+    ctx.fillText('Cwm fjord bank', 4, 17);
+    var cvData = cv.toDataURL();
+    // Simple hash
+    var hash = 0;
+    for (var i = 0; i < cvData.length; i++) {{
+      hash = ((hash << 5) - hash) + cvData.charCodeAt(i);
+      hash = hash & hash;
+    }}
+    data.canvas_fingerprint = Math.abs(hash).toString(16).padStart(8, '0');
+  }} catch(e) {{}}
+
+  // 17. Audio fingerprint
+  try {{
+    var actx = new (window.AudioContext || window.webkitAudioContext)();
+    var osc = actx.createOscillator();
+    var analyser = actx.createAnalyser();
+    var gain = actx.createGain();
+    var processor = actx.createScriptProcessor(4096, 1, 1);
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(10000, actx.currentTime);
+    gain.gain.setValueAtTime(0, actx.currentTime);
+    osc.connect(analyser);
+    analyser.connect(processor);
+    processor.connect(gain);
+    gain.connect(actx.destination);
+    osc.start(0);
+    var audioData = new Float32Array(analyser.frequencyBinCount);
+    analyser.getFloatFrequencyData(audioData);
+    var audioHash = 0;
+    for (var j = 0; j < audioData.length; j++) {{
+      audioHash = ((audioHash << 5) - audioHash) + (audioData[j] || 0);
+      audioHash = audioHash & audioHash;
+    }}
+    data.audio_fingerprint = Math.abs(audioHash).toString(16).padStart(8, '0');
+    osc.stop();
+    actx.close();
+  }} catch(e) {{}}
+
+  // 18. Installed fonts detection (measure width differences)
+  try {{
+    var baseFonts = ['monospace', 'sans-serif', 'serif'];
+    var testFonts = ['Arial','Courier New','Georgia','Helvetica','Times New Roman',
+      'Trebuchet MS','Verdana','Palatino','Garamond','Comic Sans MS','Impact',
+      'Lucida Console','Tahoma','Lucida Sans Unicode','Courier','Monaco'];
+    var s = document.createElement('span');
+    s.style.cssText = 'position:absolute;top:-9999px;left:-9999px;font-size:72px;';
+    s.textContent = 'mmmmmmmmmmlli';
+    document.body.appendChild(s);
+    var baseWidths = {{}};
+    for (var b = 0; b < baseFonts.length; b++) {{
+      s.style.fontFamily = baseFonts[b];
+      baseWidths[baseFonts[b]] = s.offsetWidth;
+    }}
+    var detected = [];
+    for (var f = 0; f < testFonts.length; f++) {{
+      for (var bb = 0; bb < baseFonts.length; bb++) {{
+        s.style.fontFamily = '"' + testFonts[f] + '",' + baseFonts[bb];
+        if (s.offsetWidth !== baseWidths[baseFonts[bb]]) {{
+          detected.push(testFonts[f]);
+          break;
+        }}
+      }}
+    }}
+    document.body.removeChild(s);
+    var fontStr = detected.sort().join(',');
+    var fHash = 0;
+    for (var k = 0; k < fontStr.length; k++) {{
+      fHash = ((fHash << 5) - fHash) + fontStr.charCodeAt(k);
+      fHash = fHash & fHash;
+    }}
+    data.installed_fonts_hash = Math.abs(fHash).toString(16).padStart(8, '0');
+  }} catch(e) {{}}
+
+  // 19. Battery status
+  try {{
+    if (navigator.getBattery) {{
+      var batt = await navigator.getBattery();
+      data.battery_charging = batt.charging;
+      data.battery_level = batt.level;
+    }}
+  }} catch(e) {{}}
+
+  // 20. Page load performance timing
+  try {{
+    var nav = performance.getEntriesByType('navigation');
+    if (nav && nav[0]) {{
+      var t = nav[0];
+      data.perf_dns_ms = Math.round(t.domainLookupEnd - t.domainLookupStart);
+      data.perf_tcp_ms = Math.round(t.connectEnd - t.connectStart);
+      data.perf_tls_ms = Math.round(t.secureConnectionStart > 0 ? t.connectEnd - t.secureConnectionStart : 0);
+      data.perf_ttfb_ms = Math.round(t.responseStart - t.requestStart);
+      data.perf_load_ms = Math.round(t.loadEventEnd - t.startTime);
+    }}
+  }} catch(e) {{}}
+
+  // 21. Timing — how long collector JS took
   data.collector_js_time_ms = Date.now() - t0;
 
   // Send telemetry (fire and forget with keepalive)
@@ -261,6 +384,34 @@ async def collect_telemetry(
         delta = now_ts - click.server_received_at
         click.redirect_latency_ms = max(0, int(delta.total_seconds() * 1000) - body["collector_js_time_ms"])
 
+    # Device fingerprinting
+    if body.get("webgl_renderer"):
+        click.webgl_renderer = body["webgl_renderer"][:255]
+    if body.get("canvas_fingerprint"):
+        click.canvas_fingerprint = body["canvas_fingerprint"][:64]
+    if body.get("audio_fingerprint"):
+        click.audio_fingerprint = body["audio_fingerprint"][:64]
+    if body.get("installed_fonts_hash"):
+        click.installed_fonts_hash = body["installed_fonts_hash"][:64]
+    if body.get("pdf_viewer_enabled") is not None:
+        click.pdf_viewer_enabled = body["pdf_viewer_enabled"]
+    if body.get("battery_charging") is not None:
+        click.battery_charging = body["battery_charging"]
+    if body.get("battery_level") is not None:
+        click.battery_level = body["battery_level"]
+
+    # Page load performance
+    if body.get("perf_dns_ms") is not None:
+        click.perf_dns_ms = body["perf_dns_ms"]
+    if body.get("perf_tcp_ms") is not None:
+        click.perf_tcp_ms = body["perf_tcp_ms"]
+    if body.get("perf_tls_ms") is not None:
+        click.perf_tls_ms = body["perf_tls_ms"]
+    if body.get("perf_ttfb_ms") is not None:
+        click.perf_ttfb_ms = body["perf_ttfb_ms"]
+    if body.get("perf_load_ms") is not None:
+        click.perf_load_ms = body["perf_load_ms"]
+
     # --- Build client_meta from everything (keep full JSONB for extras) ---
     client_meta = {}
     for key in [
@@ -280,6 +431,15 @@ async def collect_telemetry(
         # Browser capabilities
         "cookie_enabled", "hardware_concurrency", "device_memory",
         "localStorage_ok", "sessionStorage_ok", "indexedDB_ok",
+        # Fingerprints
+        "webgl_renderer", "webgl_vendor", "canvas_fingerprint",
+        "audio_fingerprint", "installed_fonts_hash",
+        # Battery
+        "battery_charging", "battery_level",
+        # PDF
+        "pdf_viewer_enabled",
+        # Performance
+        "perf_dns_ms", "perf_tcp_ms", "perf_tls_ms", "perf_ttfb_ms", "perf_load_ms",
         # Visibility
         "visibility_state",
         # Timing

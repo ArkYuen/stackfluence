@@ -278,6 +278,10 @@ async def redirect_click(
         language=intel.language,
         locale=intel.locale,
 
+        # Server-side headers
+        accept_language_full=request.headers.get("accept-language"),
+        header_order=",".join(request.headers.keys()),
+
         # Engagement signals
         is_repeat_visitor=is_repeat_visitor,
         click_number=click_number,
