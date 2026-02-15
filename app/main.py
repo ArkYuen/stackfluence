@@ -51,16 +51,26 @@ app = FastAPI(
     openapi_url="/openapi.json" if get_settings().debug else None,
 )
 
-# Security headers on every response (added first, runs inner)
+# Security headers on every response
 app.add_middleware(SecurityHeadersMiddleware)
 
-# CORS — added LAST so it runs OUTERMOST and handles preflight OPTIONS
+# CORS — tighten to your actual domains in production
+ALLOWED_ORIGINS = ["*"] if get_settings().debug else [
+    "https://stackfluence.com",
+    "https://app.stackfluence.com",
+    "https://www.stackfluence.com",
+    "https://wrpper.com",
+    "https://www.wrpper.com",
+    "https://wrpper.webflow.io",
+    "http://localhost:3000",
+    "https://stackfluence.vercel.app",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH"],
+    allow_headers=["X-API-Key", "Content-Type", "Authorization"],
 )
 
 # --- Routes ---
