@@ -101,6 +101,9 @@ class Link(Base):
     # UTM / parameter injection overrides (JSONB)
     param_overrides = Column(JSONB, nullable=True)
 
+    # Where the link was created: demo, member, api, enterprise
+    source = Column(String(20), default="member", nullable=False, index=True)
+
     status = Column(String(20), default="active")
     metadata_ = Column("metadata", JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

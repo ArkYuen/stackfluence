@@ -287,6 +287,7 @@ async def wrap_demo_link(
         campaign_slug=DEMO_CAMPAIGN_SLUG,
         asset_slug=slug,
         destination_url=original_url,
+        source="demo",
         metadata_={"source": "demo_website", "creator_ip_hash": fingerprint[:16]},
     )
     db.add(link)
