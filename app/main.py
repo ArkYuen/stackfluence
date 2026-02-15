@@ -18,7 +18,6 @@ from app.api.quick_link import router as quick_link_router
 from app.api.admin import router as admin_router
 from app.api.dashboard import router as dashboard_router
 from app.api.demo import router as demo_router
-from app.middleware.security import SecurityHeadersMiddleware
 from app.config import get_settings
 
 import structlog
@@ -51,10 +50,7 @@ app = FastAPI(
     openapi_url="/openapi.json" if get_settings().debug else None,
 )
 
-# Security headers on every response
-app.add_middleware(SecurityHeadersMiddleware)
-
-# CORS — tighten to your actual domains in production
+# CORS
 ALLOWED_ORIGINS = ["*"] if get_settings().debug else [
     "https://stackfluence.com",
     "https://app.stackfluence.com",
@@ -69,7 +65,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH"],
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
     allow_headers=["X-API-Key", "Content-Type", "Authorization"],
 )
 
