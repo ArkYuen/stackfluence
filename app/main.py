@@ -51,22 +51,12 @@ app = FastAPI(
 )
 
 # CORS
-ALLOWED_ORIGINS = ["*"] if get_settings().debug else [
-    "https://stackfluence.com",
-    "https://app.stackfluence.com",
-    "https://www.stackfluence.com",
-    "https://wrpper.com",
-    "https://www.wrpper.com",
-    "https://wrpper.webflow.io",
-    "http://localhost:3000",
-    "https://stackfluence.vercel.app",
-]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
-    allow_headers=["X-API-Key", "Content-Type", "Authorization"],
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # --- Routes ---

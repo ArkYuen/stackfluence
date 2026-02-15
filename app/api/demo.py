@@ -37,6 +37,25 @@ router = APIRouter(prefix="/demo", tags=["demo"])
 
 
 # ---------------------------------------------------------------------------
+# CORS preflight — explicit OPTIONS handler
+# ---------------------------------------------------------------------------
+
+from fastapi.responses import Response
+
+@router.options("/wrap")
+async def wrap_options():
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Max-Age": "86400",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # In-memory rate limiter for demo endpoint (simple, resets on restart)
 # ---------------------------------------------------------------------------
 
