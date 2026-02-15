@@ -214,6 +214,27 @@ class ClickEvent(Base):
     # --- Client telemetry (from collector hop JS) ---
     client_meta = Column(JSONB, nullable=True)               # screen, tz, languages, connection, UA-CH, etc.
 
+    # --- Screen & viewport (from client JS) ---
+    screen_width = Column(Integer, nullable=True)
+    screen_height = Column(Integer, nullable=True)
+    viewport_width = Column(Integer, nullable=True)
+    viewport_height = Column(Integer, nullable=True)
+    color_depth = Column(Integer, nullable=True)             # headless browsers often report 0 or 24
+
+    # --- Client environment ---
+    timezone = Column(String(100), nullable=True)            # e.g. "America/New_York" from Intl.DateTimeFormat
+    connection_type = Column(String(20), nullable=True)      # wifi, cellular, ethernet, none (navigator.connection)
+    touch_support = Column(Boolean, nullable=True)           # mobile UA with no touch = suspicious
+    hardware_concurrency = Column(Integer, nullable=True)    # CPU cores — bots on VMs often report 1-2
+    device_memory = Column(Float, nullable=True)             # GB — another VM/bot signal
+    do_not_track = Column(Boolean, nullable=True)            # navigator.doNotTrack
+    ad_blocker_detected = Column(Boolean, nullable=True)     # impacts attribution accuracy
+
+    # --- Engagement signals ---
+    is_repeat_visitor = Column(Boolean, default=False)       # based on session_id cookie
+    click_number = Column(Integer, default=1)                # nth click in this session
+    redirect_latency_ms = Column(Integer, nullable=True)     # server redirect → collector hop. Bots are instant
+
     # --- Bot / fraud ---
     risk_score = Column(Float, default=0.0)
     bot_blocked = Column(Boolean, default=False)
