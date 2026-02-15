@@ -108,6 +108,7 @@ async def collector_hop(
     data.screen_width = screen.width;
     data.screen_height = screen.height;
     data.device_pixel_ratio = window.devicePixelRatio;
+    data.color_depth = screen.colorDepth;
   }} catch(e) {{}}
 
   // 6. Timezone + language
@@ -149,7 +150,20 @@ async def collector_hop(
   // 11. Visibility state
   try {{ data.visibility_state = document.visibilityState; }} catch(e) {{}}
 
-  // 12. Timing — how long collector JS took (bots often don't execute JS at all)
+  // 12. Do Not Track
+  try {{ data.do_not_track = navigator.doNotTrack === '1' || window.doNotTrack === '1'; }} catch(e) {{}}
+
+  // 13. Ad blocker detection (try to load a bait element)
+  try {{
+    var bait = document.createElement('div');
+    bait.className = 'ad-banner ads adsbox ad-placement';
+    bait.style.cssText = 'position:absolute;top:-999px;left:-999px;width:1px;height:1px;';
+    document.body.appendChild(bait);
+    data.ad_blocker_detected = (bait.offsetHeight === 0 || bait.clientHeight === 0);
+    document.body.removeChild(bait);
+  }} catch(e) {{ data.ad_blocker_detected = null; }}
+
+  // 14. Timing — how long collector JS took (bots often don't execute JS at all)
   data.collector_js_time_ms = Date.now() - t0;
 
   // Send telemetry (fire and forget with keepalive)
@@ -212,7 +226,42 @@ async def collect_telemetry(
     if body.get("collector_page_url"):
         click.collector_page_url = body["collector_page_url"]
 
-    # --- Build client_meta from everything ---
+    # --- Write to dedicated columns ---
+    # Screen & viewport
+    if body.get("screen_width") is not None:
+        click.screen_width = body["screen_width"]
+    if body.get("screen_height") is not None:
+        click.screen_height = body["screen_height"]
+    if body.get("viewport_width") is not None:
+        click.viewport_width = body["viewport_width"]
+    if body.get("viewport_height") is not None:
+        click.viewport_height = body["viewport_height"]
+    if body.get("color_depth") is not None:
+        click.color_depth = body["color_depth"]
+
+    # Client environment
+    if body.get("timezone"):
+        click.timezone = body["timezone"]
+    if body.get("connection_type"):
+        click.connection_type = body["connection_type"]
+    if body.get("max_touch_points") is not None:
+        click.touch_support = body["max_touch_points"] > 0
+    if body.get("hardware_concurrency") is not None:
+        click.hardware_concurrency = body["hardware_concurrency"]
+    if body.get("device_memory") is not None:
+        click.device_memory = body["device_memory"]
+    if body.get("do_not_track") is not None:
+        click.do_not_track = body["do_not_track"]
+    if body.get("ad_blocker_detected") is not None:
+        click.ad_blocker_detected = body["ad_blocker_detected"]
+
+    # Redirect latency (time from server redirect to collector JS execution)
+    if click.server_received_at and body.get("collector_js_time_ms") is not None:
+        now_ts = datetime.now(timezone.utc)
+        delta = now_ts - click.server_received_at
+        click.redirect_latency_ms = max(0, int(delta.total_seconds() * 1000) - body["collector_js_time_ms"])
+
+    # --- Build client_meta from everything (keep full JSONB for extras) ---
     client_meta = {}
     for key in [
         # UA Client Hints

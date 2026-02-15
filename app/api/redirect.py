@@ -173,6 +173,16 @@ async def redirect_click(
         session_id = uuid.uuid4().hex
         new_session = True
 
+    # --- 7b. Repeat visitor + click number ---
+    is_repeat_visitor = not new_session
+    click_number = 1
+    if not new_session:
+        count_stmt = select(func.count()).select_from(ClickEvent).where(
+            ClickEvent.session_id == session_id
+        )
+        count_result = await db.execute(count_stmt)
+        click_number = (count_result.scalar() or 0) + 1
+
     # --- 8. Resolve destination ---
     final_url, injected_params = resolve_destination(
         link=link,
@@ -267,6 +277,11 @@ async def redirect_click(
         # Language
         language=intel.language,
         locale=intel.locale,
+
+        # Engagement signals
+        is_repeat_visitor=is_repeat_visitor,
+        click_number=click_number,
+        do_not_track=request.headers.get("dnt") == "1",
 
         # Bot / fraud
         risk_score=verdict.risk_score,
