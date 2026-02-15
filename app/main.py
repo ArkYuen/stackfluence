@@ -55,7 +55,7 @@ app = FastAPI(
 app.add_middleware(SecurityHeadersMiddleware)
 
 # CORS — tighten to your actual domains in production
-ALLOWED_ORIGINS = ["*"] if get_settings().debug else [
+ALLOWED_ORIGINS = [
     "https://stackfluence.com",
     "https://app.stackfluence.com",
     "https://www.stackfluence.com",
@@ -67,10 +67,10 @@ ALLOWED_ORIGINS = ["*"] if get_settings().debug else [
 ]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH"],
-    allow_headers=["X-API-Key", "Content-Type", "Authorization"],
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # --- Routes ---
