@@ -51,7 +51,10 @@ app = FastAPI(
     openapi_url="/openapi.json" if get_settings().debug else None,
 )
 
-# CORS — must be added FIRST so it wraps everything and handles preflight OPTIONS
+# Security headers on every response (added first, runs inner)
+app.add_middleware(SecurityHeadersMiddleware)
+
+# CORS — added LAST so it runs OUTERMOST and handles preflight OPTIONS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -59,9 +62,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Security headers on every response (added after CORS so CORS runs outermost)
-app.add_middleware(SecurityHeadersMiddleware)
 
 # --- Routes ---
 app.include_router(redirect_router)
