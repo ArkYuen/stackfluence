@@ -439,3 +439,120 @@ async def dashboard_me(
             "slug": org.slug,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Link creation (Supabase-authed, simplified for dashboard users)
+# ---------------------------------------------------------------------------
+
+from pydantic import BaseModel
+
+
+class CreateDashboardLinkRequest(BaseModel):
+    destination_url: str
+    creator_handle: str
+    campaign_slug: str
+    asset_slug: str | None = None
+
+
+def _validate_destination_url(url: str):
+    """Prevent open redirect attacks."""
+    from fastapi import HTTPException
+    if not url.startswith(("https://", "http://")):
+        raise HTTPException(status_code=400, detail="destination_url must start with https:// or http://")
+    blocked = ["localhost", "127.0.0.1", "0.0.0.0", "169.254.", "10.", "192.168.", "172.16."]
+    for b in blocked:
+        if b in url.split("//")[1].split("/")[0]:
+            raise HTTPException(status_code=400, detail="destination_url cannot point to internal addresses")
+
+
+@router.post("/links")
+async def create_dashboard_link(
+    req: CreateDashboardLinkRequest,
+    auth: SupabaseAuthContext = Depends(require_supabase_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a wrapped link from the dashboard. Auto-creates creator + campaign if needed."""
+    from uuid import uuid4
+    from app.config import get_settings
+
+    settings = get_settings()
+    _validate_destination_url(req.destination_url)
+
+    org_id = auth.organization_id
+
+    # Find or create creator by handle within this org
+    creator_result = await db.execute(
+        select(Creator).where(Creator.handle == req.creator_handle)
+    )
+    creator = creator_result.scalar_one_or_none()
+    if not creator:
+        creator = Creator(
+            id=uuid4(),
+            handle=req.creator_handle,
+            display_name=req.creator_handle,
+        )
+        db.add(creator)
+        await db.flush()
+
+    # Find or create campaign by slug within this org
+    from app.models.tables import Campaign
+    campaign_result = await db.execute(
+        select(Campaign).where(
+            Campaign.slug == req.campaign_slug,
+            Campaign.organization_id == org_id,
+        )
+    )
+    campaign = campaign_result.scalar_one_or_none()
+    if not campaign:
+        campaign = Campaign(
+            id=uuid4(),
+            organization_id=org_id,
+            name=req.campaign_slug,
+            slug=req.campaign_slug,
+        )
+        db.add(campaign)
+        await db.flush()
+
+    # Check for duplicate route
+    dup_result = await db.execute(
+        select(Link).where(
+            Link.creator_handle == req.creator_handle,
+            Link.campaign_slug == req.campaign_slug,
+            Link.asset_slug == req.asset_slug,
+        )
+    )
+    if dup_result.scalar_one_or_none():
+        from fastapi import HTTPException
+        raise HTTPException(status_code=409, detail="A link with this creator/campaign/asset combination already exists")
+
+    link = Link(
+        id=uuid4(),
+        organization_id=org_id,
+        creator_id=creator.id,
+        campaign_id=campaign.id,
+        creator_handle=req.creator_handle,
+        campaign_slug=req.campaign_slug,
+        asset_slug=req.asset_slug,
+        destination_url=req.destination_url,
+        source="member",
+    )
+    db.add(link)
+    await db.commit()
+    await db.refresh(link)
+
+    path = f"/c/{link.creator_handle}/{link.campaign_slug}"
+    if link.asset_slug:
+        path += f"/{link.asset_slug}"
+    wrapper_url = f"{settings.base_url}{path}"
+
+    return {
+        "id": str(link.id),
+        "wrapper_url": wrapper_url,
+        "destination_url": link.destination_url,
+        "creator_handle": link.creator_handle,
+        "campaign_slug": link.campaign_slug,
+        "asset_slug": link.asset_slug,
+        "status": link.status,
+        "created_at": link.created_at.isoformat() if link.created_at else None,
+    }
