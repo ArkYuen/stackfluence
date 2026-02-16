@@ -142,7 +142,16 @@ async def redirect_click(
     elif verdict.risk_score >= settings.bot_risk_flag_threshold:
         bot_reason = verdict.reason
 
-    # --- 3. Analyze click (referrer intelligence) ---
+    # --- 3. Capture query params + sec-fetch (needed for intelligence) ---
+    all_query_params = dict(request.query_params)
+    platform_params = extract_platform_params(all_query_params)
+
+    sec_fetch_site = request.headers.get("sec-fetch-site")
+    sec_fetch_mode = request.headers.get("sec-fetch-mode")
+    sec_fetch_dest = request.headers.get("sec-fetch-dest")
+    sec_fetch_user = request.headers.get("sec-fetch-user")
+
+    # --- 4. Analyze click (referrer intelligence — full priority chain) ---
     referer = request.headers.get("referer")
     accept_lang = request.headers.get("accept-language")
 
@@ -151,17 +160,8 @@ async def redirect_click(
         referer=referer,
         accept_language=accept_lang,
         headers=headers_dict,
+        query_params=all_query_params,
     )
-
-    # --- 4. Capture sec-fetch metadata headers ---
-    sec_fetch_site = request.headers.get("sec-fetch-site")
-    sec_fetch_mode = request.headers.get("sec-fetch-mode")
-    sec_fetch_dest = request.headers.get("sec-fetch-dest")
-    sec_fetch_user = request.headers.get("sec-fetch-user")
-
-    # --- 5. Capture platform-injected params ---
-    all_query_params = dict(request.query_params)
-    platform_params = extract_platform_params(all_query_params)
 
     # --- 6. Mint click_id ---
     click_id = mint_click_id()

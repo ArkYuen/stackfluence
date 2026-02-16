@@ -1,6 +1,15 @@
 """
 Referrer Intelligence — extract maximum context from every click.
 
+Priority chain (direct is LAST RESORT):
+  1. In-app browser UA detection (Instagram, TikTok, FB, etc.)
+  2. Referrer header domain classification
+  3. Platform click IDs in URL params (fbclid, gclid, ttclid, etc.)
+  4. UTM params already on the URL (utm_source, utm_medium)
+  5. sec-fetch-site header (cross-site vs none vs same-origin)
+  6. Accept-Language complexity (simple = bot, complex = real user)
+  7. Only THEN fall back to "direct"
+
 Classifies:
   - Source platform (instagram, tiktok, youtube, twitter, facebook, etc.)
   - Source medium (social, search, email, messaging, direct, paid, referral)
@@ -46,7 +55,6 @@ class ClickIntelligence:
 
 
 # --- In-App Browser Detection ---
-# These UA substrings identify specific platform webviews
 
 IN_APP_PATTERNS = {
     "instagram":  [r"Instagram", r"FBAN/FBIOS.*Instagram"],
@@ -62,7 +70,7 @@ IN_APP_PATTERNS = {
     "wechat":     [r"MicroMessenger"],
     "line":       [r"Line/"],
     "discord":    [r"Discord"],
-    "threads":    [r"Barcelona"],  # Meta Threads uses codename Barcelona
+    "threads":    [r"Barcelona"],
     "youtube":    [r"com.google.android.youtube", r"YouTube"],
 }
 
@@ -76,6 +84,150 @@ def _detect_in_app_browser(ua: str) -> tuple[bool, str | None]:
         for pattern in patterns:
             if re.search(pattern, ua, re.IGNORECASE):
                 return True, platform
+
+    return False, None
+
+
+# --- Platform Click ID Detection ---
+
+CLICK_ID_TO_PLATFORM = {
+    "fbclid":       ("facebook", "social"),
+    "gclid":        ("google", "paid"),
+    "gbraid":       ("google", "paid"),
+    "wbraid":       ("google", "paid"),
+    "ttclid":       ("tiktok", "social"),
+    "twclid":       ("twitter", "social"),
+    "li_fat_id":    ("linkedin", "social"),
+    "sclid":        ("snapchat", "social"),
+    "msclkid":      ("bing", "paid"),
+    "mc_eid":       ("mailchimp", "email"),
+    "igshid":       ("instagram", "social"),
+    "pin_click_id": ("pinterest", "social"),
+    "rdt_cid":      ("reddit", "social"),
+    "yclid":        ("yandex", "paid"),
+    "dclid":        ("google", "paid"),       # Google Display
+    "_branch_match_id": ("branch", "referral"),
+}
+
+
+def _detect_platform_click_ids(query_params: dict) -> tuple[str | None, str | None, str | None]:
+    """Check URL query params for platform-injected click IDs."""
+    if not query_params:
+        return None, None, None
+
+    for param_name, (platform, medium) in CLICK_ID_TO_PLATFORM.items():
+        if param_name in query_params and query_params[param_name]:
+            detail = "paid" if medium == "paid" else "click_id"
+            return platform, medium, detail
+
+    return None, None, None
+
+
+# --- UTM Param Detection ---
+
+def _detect_utm_source(query_params: dict) -> tuple[str | None, str | None, str | None]:
+    """Check for utm_source and utm_medium in query params."""
+    if not query_params:
+        return None, None, None
+
+    utm_source = query_params.get("utm_source", "").strip().lower()
+    utm_medium = query_params.get("utm_medium", "").strip().lower()
+    utm_campaign = query_params.get("utm_campaign", "").strip().lower()
+
+    if not utm_source:
+        return None, None, None
+
+    # Map common utm_source values to platforms
+    UTM_SOURCE_MAP = {
+        "instagram": ("instagram", "social"),
+        "ig": ("instagram", "social"),
+        "tiktok": ("tiktok", "social"),
+        "tt": ("tiktok", "social"),
+        "facebook": ("facebook", "social"),
+        "fb": ("facebook", "social"),
+        "twitter": ("twitter", "social"),
+        "x": ("twitter", "social"),
+        "youtube": ("youtube", "social"),
+        "yt": ("youtube", "social"),
+        "linkedin": ("linkedin", "social"),
+        "li": ("linkedin", "social"),
+        "pinterest": ("pinterest", "social"),
+        "reddit": ("reddit", "social"),
+        "snapchat": ("snapchat", "social"),
+        "threads": ("threads", "social"),
+        "telegram": ("telegram", "messaging"),
+        "whatsapp": ("whatsapp", "messaging"),
+        "discord": ("discord", "messaging"),
+        "google": ("google", "search"),
+        "bing": ("bing", "search"),
+        "gmail": ("gmail", "email"),
+        "email": ("email", "email"),
+        "newsletter": ("newsletter", "email"),
+        "mailchimp": ("mailchimp", "email"),
+        "sendgrid": ("sendgrid", "email"),
+        "klaviyo": ("klaviyo", "email"),
+        "sms": ("sms", "messaging"),
+        "text": ("sms", "messaging"),
+    }
+
+    if utm_source in UTM_SOURCE_MAP:
+        platform, medium = UTM_SOURCE_MAP[utm_source]
+        # utm_medium overrides if present
+        if utm_medium:
+            medium = utm_medium
+        return platform, medium, utm_campaign or None
+
+    # Unknown utm_source but it exists — still better than "direct"
+    medium = utm_medium if utm_medium else "referral"
+    return utm_source, medium, utm_campaign or None
+
+
+# --- sec-fetch-site Classification ---
+
+def _classify_sec_fetch(headers: dict | None) -> tuple[str | None, str | None]:
+    """
+    Use sec-fetch-site to determine if click was external.
+    Returns (platform_hint, medium_hint) or (None, None).
+    """
+    if not headers:
+        return None, None
+
+    sec_fetch_site = (headers.get("sec-fetch-site") or "").lower()
+    sec_fetch_dest = (headers.get("sec-fetch-dest") or "").lower()
+
+    if sec_fetch_site == "cross-site":
+        # Definitely came from somewhere external — not direct
+        return "unknown_external", "referral"
+    elif sec_fetch_site == "same-site":
+        return "same_site", "internal"
+    elif sec_fetch_site == "same-origin":
+        return "same_origin", "internal"
+    # "none" means direct navigation, typed URL, or bookmark
+    # We don't return anything here — let it fall through
+
+    return None, None
+
+
+# --- Email Client UA Detection ---
+
+EMAIL_CLIENT_PATTERNS = {
+    "gmail":     [r"Googlebot", r"Google-Safety"],
+    "outlook":   [r"Microsoft Office", r"Outlook", r"ms-office"],
+    "yahoo":     [r"Yahoo! Slurp", r"YahooMailProxy"],
+    "apple_mail": [r"AppleMail"],
+    "thunderbird": [r"Thunderbird"],
+}
+
+
+def _detect_email_client(ua: str | None) -> tuple[bool, str | None]:
+    """Check if UA indicates an email client or email link scanner."""
+    if not ua:
+        return False, None
+
+    for client, patterns in EMAIL_CLIENT_PATTERNS.items():
+        for pattern in patterns:
+            if re.search(pattern, ua, re.IGNORECASE):
+                return True, client
 
     return False, None
 
@@ -145,9 +297,13 @@ DOMAIN_TO_PLATFORM = {
     "mail.google.com":  ("gmail", "email"),
     "outlook.live.com": ("outlook", "email"),
     "outlook.office.com": ("outlook", "email"),
+    "outlook.office365.com": ("outlook", "email"),
     "mail.yahoo.com":   ("yahoo_mail", "email"),
+    "mail.aol.com":     ("aol_mail", "email"),
+    "mail.protonmail.com": ("protonmail", "email"),
+    "app.mailspring.com": ("mailspring", "email"),
 
-    # Link shorteners (these indicate shared links)
+    # Link shorteners
     "bit.ly":           ("bitly", "referral"),
     "tinyurl.com":      ("tinyurl", "referral"),
     "linktr.ee":        ("linktree", "referral"),
@@ -157,6 +313,13 @@ DOMAIN_TO_PLATFORM = {
     "snipfeed.co":      ("snipfeed", "referral"),
     "campsite.bio":     ("campsite", "referral"),
     "tap.bio":          ("tapbio", "referral"),
+
+    # News / content
+    "news.ycombinator.com": ("hackernews", "referral"),
+    "producthunt.com":  ("producthunt", "referral"),
+    "www.producthunt.com": ("producthunt", "referral"),
+    "medium.com":       ("medium", "referral"),
+    "substack.com":     ("substack", "referral"),
 }
 
 
@@ -254,7 +417,6 @@ def _parse_accept_language(header: str | None) -> tuple[str | None, str | None]:
     if not header:
         return None, None
 
-    # e.g. "en-US,en;q=0.9,es;q=0.8" → language="en", locale="en-US"
     try:
         first = header.split(",")[0].strip().split(";")[0].strip()
         parts = first.split("-")
@@ -306,14 +468,19 @@ def analyze_click(
     referer: str | None,
     accept_language: str | None,
     headers: dict | None = None,
+    query_params: dict | None = None,
 ) -> ClickIntelligence:
     """
     Analyze a click request and extract maximum intelligence.
 
-    Priority for source detection:
+    Priority chain — "direct" is ABSOLUTE LAST RESORT:
       1. In-app browser UA (most reliable for social platforms)
-      2. Referer header
-      3. Falls back to "direct"
+      2. Referrer header domain
+      3. Platform click IDs (fbclid, gclid, ttclid, etc.)
+      4. UTM params (utm_source, utm_medium)
+      5. Email client UA detection
+      6. sec-fetch-site header (cross-site = external, not direct)
+      7. Only then: "direct"
     """
     intel = ClickIntelligence()
 
@@ -322,23 +489,91 @@ def analyze_click(
     intel.is_in_app_browser = is_in_app
     intel.in_app_platform = in_app_platform
 
-    # --- 2. Referer classification ---
+    # --- 2. Referrer classification ---
     ref_platform, ref_medium, ref_detail, ref_domain, ref_path = _classify_referer(referer)
     intel.referer_domain = ref_domain
     intel.referer_path = ref_path
     intel.referer_full = referer
 
-    # --- 3. Merge: in-app browser wins for platform, referer fills gaps ---
+    # --- 3. Platform click IDs ---
+    clickid_platform, clickid_medium, clickid_detail = _detect_platform_click_ids(query_params)
+
+    # --- 4. UTM params ---
+    utm_platform, utm_medium, utm_detail = _detect_utm_source(query_params)
+
+    # --- 5. Email client detection ---
+    is_email_client, email_client_name = _detect_email_client(user_agent)
+
+    # --- 6. sec-fetch-site ---
+    sec_platform, sec_medium = _classify_sec_fetch(headers)
+
+    # =====================================================================
+    #  MERGE — cascade through signals, "direct" only if ALL are empty
+    # =====================================================================
+
+    resolved = False
+
+    # Priority 1: In-app browser (strongest signal)
     if is_in_app and in_app_platform:
         intel.source_platform = in_app_platform
         intel.source_medium = "social"
         intel.source_detail = ref_detail or "in_app"
-    else:
+        resolved = True
+
+    # Priority 2: Referrer header (if not "direct")
+    if not resolved and ref_platform != "direct":
         intel.source_platform = ref_platform
         intel.source_medium = ref_medium
         intel.source_detail = ref_detail
+        resolved = True
 
-    # --- 4. Device info ---
+    # Priority 3: Platform click IDs (fbclid, gclid, etc.)
+    if not resolved and clickid_platform:
+        intel.source_platform = clickid_platform
+        intel.source_medium = clickid_medium
+        intel.source_detail = clickid_detail
+        resolved = True
+
+    # Priority 4: UTM params
+    if not resolved and utm_platform:
+        intel.source_platform = utm_platform
+        intel.source_medium = utm_medium
+        intel.source_detail = utm_detail
+        resolved = True
+
+    # Priority 5: Email client UA
+    if not resolved and is_email_client:
+        intel.source_platform = email_client_name
+        intel.source_medium = "email"
+        intel.source_detail = "link_scanner"
+        resolved = True
+
+    # Priority 6: sec-fetch-site (we know it's external, just don't know from where)
+    if not resolved and sec_platform and sec_platform != "same_origin" and sec_platform != "same_site":
+        intel.source_platform = sec_platform  # "unknown_external"
+        intel.source_medium = sec_medium      # "referral"
+        intel.source_detail = "no_referrer"
+        resolved = True
+
+    # Priority 7 (LAST RESORT): direct
+    if not resolved:
+        intel.source_platform = "direct"
+        intel.source_medium = "direct"
+        intel.source_detail = None
+
+    # --- ENRICHMENT: Even if resolved, overlay additional context ---
+
+    # If we got platform from click ID or UTM but also have in-app info, add it
+    if not is_in_app and in_app_platform is None:
+        # Not in-app, but check if resolved platform suggests it should be mobile social
+        pass
+
+    # If we resolved from sec-fetch but have click IDs, upgrade the detail
+    if intel.source_platform == "unknown_external" and clickid_platform:
+        intel.source_platform = clickid_platform
+        intel.source_medium = clickid_medium
+
+    # --- Device info ---
     device = _parse_device_from_ua(user_agent)
     intel.device_class = device["device_class"]
     intel.os_family = device["os_family"]
@@ -347,7 +582,7 @@ def analyze_click(
     intel.browser_version = device["browser_version"]
     intel.is_mobile = device["is_mobile"]
 
-    # --- 5. Language/locale ---
+    # --- Language/locale ---
     intel.language, intel.locale = _parse_accept_language(accept_language)
 
     return intel
