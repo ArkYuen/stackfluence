@@ -18,6 +18,7 @@ from app.api.quick_link import router as quick_link_router
 from app.api.admin import router as admin_router
 from app.api.dashboard import router as dashboard_router
 from app.api.demo import router as demo_router
+from app.api.pixel import router as pixel_router
 from app.config import get_settings
 
 import structlog
@@ -68,6 +69,7 @@ app.include_router(quick_link_router)
 app.include_router(admin_router)
 app.include_router(dashboard_router)
 app.include_router(demo_router)
+app.include_router(pixel_router)
 
 # --- Static files ---
 _static_dir = Path(__file__).resolve().parent.parent / "static"
