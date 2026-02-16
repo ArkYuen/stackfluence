@@ -36,7 +36,7 @@
 
   // Cookie config
   var COOKIE_NAME = "_wrp";
-  var COOKIE_DAYS = 30;
+  var COOKIE_DAYS = 365;
 
   if (!API_KEY) {
     console.warn("[Wrpper] Missing data-key. Pixel inactive.");
