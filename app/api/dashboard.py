@@ -556,3 +556,40 @@ async def create_dashboard_link(
         "status": link.status,
         "created_at": link.created_at.isoformat() if link.created_at else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Pixel snippet generator
+# ---------------------------------------------------------------------------
+
+@router.get("/pixel-snippet")
+async def get_pixel_snippet(
+    auth: SupabaseAuthContext = Depends(require_supabase_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the pixel install snippet pre-configured with the user's org ID."""
+    from app.config import get_settings
+    settings = get_settings()
+
+    org_id = auth.organization_id
+
+    # Check if org has an API key; if not, generate one
+    from app.models.tables import Organization
+    org_result = await db.execute(select(Organization).where(Organization.id == org_id))
+    org = org_result.scalar_one()
+
+    # For now, use a simple publishable key format
+    pub_key = f"wrp_pub_{org.slug}"
+
+    snippet = f'''<!-- Wrpper Attribution Pixel -->
+<script src="{settings.base_url}/static/wrp.js"
+        data-key="{pub_key}"
+        data-org="{org_id}"></script>'''
+
+    return {
+        "snippet": snippet,
+        "org_id": org_id,
+        "pub_key": pub_key,
+        "pixel_url": f"{settings.base_url}/static/wrp.js",
+        "instructions": "Add this script tag to every page on your advertiser's website, just before </body>. The pixel will automatically track sessions, pageviews, and attribute conversions to your wrapped links.",
+    }
