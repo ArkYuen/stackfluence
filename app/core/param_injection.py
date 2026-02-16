@@ -275,29 +275,41 @@ def resolve_destination(
         if "ios" in os_lower or "iphone" in os_lower or "ipad" in os_lower:
             if link.universal_link:
                 base_url = link.universal_link
-            elif link.ios_deeplink:
-                deep_url = link.ios_deeplink
-                if "?" in deep_url:
-                    deep_url += f"&inf_click_id={click_id}"
-                else:
-                    deep_url += f"?inf_click_id={click_id}"
-                if link.ios_fallback_url:
-                    base_url = link.ios_fallback_url
-                    params["ios_deeplink"] = deep_url
+            elif link.ios_fallback_url:
+                base_url = link.ios_fallback_url
 
         elif "android" in os_lower:
             if link.universal_link:
                 base_url = link.universal_link
-            elif link.android_deeplink:
-                deep_url = link.android_deeplink
-                if "?" in deep_url:
-                    deep_url += f"&inf_click_id={click_id}"
-                else:
-                    deep_url += f"?inf_click_id={click_id}"
-                if link.android_fallback_url:
-                    base_url = link.android_fallback_url
-                    params["android_deeplink"] = deep_url
+            elif link.android_fallback_url:
+                base_url = link.android_fallback_url
 
-    # Use "only_if_missing" policy — don't overwrite advertiser's existing UTMs
-    final_url = inject_params_to_url(base_url, params, policy="only_if_missing")
+    # --- Build the final URL ---
+    # ONLY inject inf_click_id into the destination URL.
+    # UTM params, platform params, and everything else stay in the DB only.
+    # The advertiser's URL stays clean — no leaked tracking params.
+    url_params = {"inf_click_id": click_id}
+
+    # Platform passthrough params (fbclid, gclid, etc.) — these are expected by
+    # advertisers' analytics tools, so we DO forward them.
+    if platform_params:
+        url_params.update(platform_params)
+
+    # Per-link overrides — the brand explicitly wants these on the URL
+    if link.param_overrides:
+        url_params.update(link.param_overrides)
+
+    # Mobile deep link params if applicable
+    if is_mobile and os_family:
+        os_lower = os_family.lower() if os_family else ""
+        if ("ios" in os_lower or "iphone" in os_lower or "ipad" in os_lower):
+            if link.ios_deeplink and link.ios_fallback_url:
+                url_params["ios_deeplink"] = link.ios_deeplink + \
+                    ("&" if "?" in link.ios_deeplink else "?") + f"inf_click_id={click_id}"
+        elif "android" in os_lower:
+            if link.android_deeplink and link.android_fallback_url:
+                url_params["android_deeplink"] = link.android_deeplink + \
+                    ("&" if "?" in link.android_deeplink else "?") + f"inf_click_id={click_id}"
+
+    final_url = inject_params_to_url(base_url, url_params, policy="only_if_missing")
     return final_url, params
