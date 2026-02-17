@@ -179,3 +179,75 @@ async def ingest_refund(
 
     logger.info("refund_event", click_id=payload.inf_click_id, order_id=payload.original_order_id)
     return {"status": "ok", "event_type": "refund"}
+
+
+# ---------------------------------------------------------------------------
+# Universal event endpoint (v5 pixel — captures everything)
+# ---------------------------------------------------------------------------
+
+class UniversalEventPayload(BaseModel):
+    """Accept anything the pixel sends. Minimal validation, maximum capture."""
+    click_id: str | None = None
+    org_id: str | None = None
+    organization_id: str | None = None  # backward compat
+    session_id: str | None = None
+    event_type: str
+    event_source: str = "unknown"
+    event_data: dict | None = None
+    timestamp: str | None = None
+    page: dict | None = None
+    visitor: dict | None = None
+    site_signals: dict | None = None
+
+    # Legacy fields that might come in
+    inf_click_id: str | None = None
+
+
+@router.post("/universal", status_code=201)
+async def ingest_universal(
+    payload: UniversalEventPayload,
+    auth: AuthContext = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Universal event ingestion — accepts any event from the v5 pixel.
+    Minimal validation. Store everything. Classify later.
+    """
+    rate_limit_api_key(str(auth.key_id))
+
+    org_id = payload.org_id or payload.organization_id or str(auth.organization_id)
+    click_id = payload.click_id or payload.inf_click_id
+
+    page = payload.page or {}
+    visitor = payload.visitor or {}
+
+    from app.models.tables import UniversalEvent
+
+    event = UniversalEvent(
+        click_id=click_id,
+        organization_id=org_id,
+        session_id=payload.session_id,
+        event_type=payload.event_type,
+        event_source=payload.event_source,
+        event_data=payload.event_data,
+        page_url=page.get("url"),
+        page_path=page.get("path"),
+        page_title=page.get("title"),
+        page_type=page.get("type_hint") or (payload.event_data or {}).get("page_type"),
+        visit_number=visitor.get("visit_number"),
+        pages_this_session=visitor.get("pages_this_session"),
+        days_since_first_visit=visitor.get("days_since_first_visit"),
+        detected_vertical=(payload.event_data or {}).get("detected_vertical") if payload.event_type == "site_detection" else None,
+        detected_tools=(payload.event_data or {}).get("tools") if payload.event_type == "site_detection" else None,
+    )
+    db.add(event)
+    await db.commit()
+
+    logger.info("universal_event",
+                event_type=payload.event_type,
+                event_source=payload.event_source,
+                click_id=click_id,
+                org=org_id,
+                session=payload.session_id)
+
+    return {"status": "ok", "event_type": payload.event_type}

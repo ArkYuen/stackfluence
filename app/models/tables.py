@@ -354,3 +354,58 @@ class RefundEvent(Base):
     refund_amount_cents = Column(Integer, nullable=True)
     reason = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# Universal event table (v5 pixel — capture everything, classify later)
+# ---------------------------------------------------------------------------
+
+class UniversalEvent(Base):
+    """
+    Catch-all event table for the v5 pixel.
+    Stores every signal from every layer — DOM observations, behavior,
+    dataLayer intercepts, site detection, etc.
+    The agent layer processes these into actionable insights.
+    """
+    __tablename__ = "universal_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    click_id = Column(String(100), nullable=True, index=True)
+    organization_id = Column(String(100), nullable=False, index=True)
+    session_id = Column(String(100), nullable=True, index=True)
+
+    event_type = Column(String(100), nullable=False, index=True)
+    event_source = Column(String(50), nullable=False)  # passive, dom_observer, behavior, datalayer_auto, detection, url_pattern, manual
+
+    # Full event payload as JSONB
+    event_data = Column(JSONB, nullable=True)
+
+    # Page context snapshot
+    page_url = Column(Text, nullable=True)
+    page_path = Column(String(500), nullable=True)
+    page_title = Column(String(500), nullable=True)
+    page_type = Column(String(50), nullable=True)  # classified page type
+
+    # Visitor context snapshot
+    visit_number = Column(Integer, nullable=True)
+    pages_this_session = Column(Integer, nullable=True)
+    days_since_first_visit = Column(Integer, nullable=True)
+
+    # Site detection cache
+    detected_vertical = Column(String(50), nullable=True)
+    detected_tools = Column(JSONB, nullable=True)
+
+    # Agent layer fields (filled post-ingestion)
+    conversion_score = Column(Float, nullable=True)        # 0.0 - 1.0
+    conversion_type = Column(String(50), nullable=True)     # hard, soft, engagement, noise
+    attribution_confidence = Column(String(20), nullable=True)  # high, medium, low
+    agent_processed = Column(Boolean, default=False)
+    agent_notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_universal_events_org_type", "organization_id", "event_type"),
+        Index("ix_universal_events_org_created", "organization_id", "created_at"),
+        Index("ix_universal_events_session", "session_id", "created_at"),
+    )
