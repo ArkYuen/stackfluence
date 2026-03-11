@@ -409,3 +409,21 @@ class UniversalEvent(Base):
         Index("ix_universal_events_org_created", "organization_id", "created_at"),
         Index("ix_universal_events_session", "session_id", "created_at"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Pixel configuration (server-side CAPI + browser-side pixel firing)
+# ---------------------------------------------------------------------------
+
+class PixelConfig(Base):
+    __tablename__ = "pixel_configs"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False)
+    link_id = Column(UUID(as_uuid=True), ForeignKey("links.id"), nullable=True)
+    platform = Column(String(50), nullable=False)
+    pixel_id = Column(String(255), nullable=False)
+    access_token = Column(Text, nullable=True)
+    test_event_code = Column(String(100), nullable=True)
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())

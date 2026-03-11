@@ -9,11 +9,13 @@ POST /v1/events/custom     → Generic custom event passthrough
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import get_db
+from app.models.tables import PixelConfig, ClickEvent
 from app.middleware.auth import AuthContext, require_auth, enforce_org_scope
 from app.middleware.rate_limit import rate_limit_api_key
 from app.core.click_id import verify_click_id
@@ -138,3 +140,113 @@ async def custom_event(
     )
 
     return {"status": "ok", "event_type": "custom", "event_name": payload.event_name}
+
+
+@router.get("/px/{click_id}", response_class=HTMLResponse, include_in_schema=False)
+async def pixel_fire_page(
+    click_id: str,
+    dst: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Intermediary HTML page that:
+    1. Fires browser-side pixels (Meta, TikTok, GA4, Snapchat)
+    2. JS-redirects to final destination
+
+    This allows browser-side pixel events while also having CAPI server-side fallback.
+    The click_id is used as event_id for deduplication.
+    """
+    # Look up click to get org + pixel configs
+    click_stmt = select(ClickEvent).where(ClickEvent.click_id == click_id)
+    click_result = await db.execute(click_stmt)
+    click = click_result.scalar_one_or_none()
+
+    pixel_scripts = ""
+
+    if click:
+        pixel_stmt = select(PixelConfig).where(
+            PixelConfig.organization_id == click.organization_id,
+            PixelConfig.enabled == True,
+            or_(PixelConfig.link_id == click.link_id, PixelConfig.link_id == None)
+        )
+        pixel_result = await db.execute(pixel_stmt)
+        configs = pixel_result.scalars().all()
+
+        for config in configs:
+            if config.platform == "meta":
+                pixel_scripts += f"""
+                    !function(f,b,e,v,n,t,s){{if(f.fbq)return;n=f.fbq=function(){{n.callMethod?
+                    n.callMethod.apply(n,arguments):n.queue.push(arguments)}};if(!f._fbq)f._fbq=n;
+                    n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
+                    t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}}(window,
+                    document,'script','https://connect.facebook.net/en_US/fbevents.js');
+                    fbq('init', '{config.pixel_id}');
+                    fbq('track', 'ViewContent', {{}}, {{eventID: '{click_id}'}});
+                """
+            elif config.platform == "tiktok":
+                pixel_scripts += f"""
+                    !function (w, d, t) {{
+                      w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie"],ttq.setAndDefer=function(t,e){{t[e]=function(){{t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}}}; for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.instance=function(t){{for(var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n]);return e}},ttq.load=function(e,n){{var i="https://analytics.tiktok.com/i18n/pixel/events.js";ttq._i=ttq._i||{{}},ttq._i[e]=[],ttq._i[e]._u=i,ttq._t=ttq._t||{{}},ttq._t[e]=+new Date,ttq._o=ttq._o||{{}},ttq._o[e]=n||{{}};var o=document.createElement("script");o.type="text/javascript",o.async=!0,o.src=i+"?sdkid="+e+"&lib="+t;var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(o,a)}};
+                      ttq.load('{config.pixel_id}');
+                      ttq.page();
+                      ttq.track('ClickButton', {{}}, {{event_id: '{click_id}'}});
+                    }}(window, document, 'ttq');
+                """
+            elif config.platform == "ga4":
+                pixel_scripts += f"""
+                    <script async src="https://www.googletagmanager.com/gtag/js?id={config.pixel_id}"></script>
+                    <script>
+                    window.dataLayer = window.dataLayer || [];
+                    function gtag(){{dataLayer.push(arguments);}}
+                    gtag('js', new Date());
+                    gtag('config', '{config.pixel_id}');
+                    gtag('event', 'influencer_click', {{'click_id': '{click_id}'}});
+                    </script>
+                """
+            elif config.platform == "snapchat":
+                pixel_scripts += f"""
+                    (function(e,t,n){{if(e.snaptr)return;var a=e.snaptr=function()
+                    {{a.handleRequest?a.handleRequest.apply(a,arguments):a.queue.push(arguments)}};
+                    a.queue=[];var s='script';r=t.createElement(s);r.async=!0;
+                    r.src=n;var u=t.getElementsByTagName(s)[0];
+                    u.parentNode.insertBefore(r,u);}})(window,document,
+                    'https://sc-static.net/scevent.min.js');
+                    snaptr('init', '{config.pixel_id}');
+                    snaptr('track', 'PAGE_VIEW', {{'client_dedup_id': '{click_id}'}});
+                """
+
+    # Wrap non-GA4 scripts in a single script tag
+    # GA4 scripts already have their own tags
+    ga4_scripts = ""
+    other_scripts = ""
+    for line in pixel_scripts.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("<script") or stripped.startswith("</script>"):
+            ga4_scripts += line + "\n"
+        else:
+            other_scripts += line + "\n"
+
+    script_block = ""
+    if other_scripts.strip():
+        script_block += f"<script>{other_scripts}</script>\n"
+    script_block += ga4_scripts
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Redirecting...</title>
+{script_block}
+</head>
+<body>
+<script>
+  setTimeout(function() {{
+    window.location.replace("{dst}");
+  }}, 150);
+</script>
+<noscript><meta http-equiv="refresh" content="0;url={dst}"></noscript>
+</body>
+</html>"""
+
+    return HTMLResponse(content=html)

@@ -24,14 +24,16 @@ Flow:
      Otherwise → 302 to /r/{click_id} (collector hop)
 """
 
+import asyncio
 import hashlib
 import time
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -40,7 +42,8 @@ from app.core.click_id import mint_click_id
 from app.core.referrer_intelligence import analyze_click
 from app.core.param_injection import resolve_destination, extract_platform_params
 from app.models.database import get_db
-from app.models.tables import ClickEvent, ClickEventLog, Link
+from app.models.tables import ClickEvent, ClickEventLog, Link, PixelConfig
+from app.services.pixel_fire import fire_pixels_for_click
 from app.middleware.rate_limit import rate_limit_ip, rate_limit_link, check_dedupe
 
 import structlog
@@ -353,6 +356,26 @@ async def redirect_click(
     click_event.server_responded_at = datetime.now(timezone.utc)
     await db.commit()
 
+    # --- Fire server-side pixels (non-blocking) ---
+    pixel_stmt = select(PixelConfig).where(
+        PixelConfig.organization_id == link.organization_id,
+        PixelConfig.enabled == True,
+        or_(PixelConfig.link_id == link.id, PixelConfig.link_id == None)
+    )
+    pixel_result = await db.execute(pixel_stmt)
+    pixel_configs = pixel_result.scalars().all()
+
+    if pixel_configs:
+        asyncio.create_task(
+            fire_pixels_for_click(
+                pixel_configs=pixel_configs,
+                click_id=str(click_id),
+                ip=ip,
+                ua=ua or "",
+                destination_url=final_url,
+            )
+        )
+
     logger.info("click_received",
                 click_id=str(click_id),
                 session_id=session_id,
@@ -371,8 +394,9 @@ async def redirect_click(
     if nocollect:
         response = RedirectResponse(url=final_url, status_code=302)
     else:
-        collector_url = f"{settings.base_url}/r/{click_id}"
-        response = RedirectResponse(url=collector_url, status_code=302)
+        # Redirect through pixel fire page (fires browser pixels + then JS redirects)
+        pixel_page_url = f"{settings.base_url}/v1/px/{click_id}?dst={quote(final_url, safe='')}"
+        response = RedirectResponse(url=pixel_page_url, status_code=302)
 
     # Click ID cookie (7 days)
     is_secure = not settings.debug
