@@ -116,6 +116,103 @@ async def fire_snapchat_capi(pixel_id: str, access_token: str, click_id: str, ip
         logger.warning("snapchat_capi_failed", error=str(e), click_id=click_id)
 
 
+async def fire_linkedin_capi(pixel_id: str, access_token: str, click_id: str, ip: str, ua: str, page_url: str):
+    """Fire conversion event to LinkedIn Conversions API"""
+    try:
+        payload = {
+            "conversion": f"urn:lla:llaPartnerConversion:{pixel_id}",
+            "conversionHappenedAt": int(time.time() * 1000),
+            "eventId": click_id,
+            "user": {
+                "userIds": [],
+                "userInfo": {
+                    "firstName": None,
+                }
+            },
+            "attribution": {
+                "userActionAt": int(time.time() * 1000),
+                "page": page_url,
+            }
+        }
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                "https://api.linkedin.com/rest/conversionEvents",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "LinkedIn-Version": "202401",
+                    "Content-Type": "application/json",
+                    "X-RestLi-Protocol-Version": "2.0.0",
+                },
+                json=payload,
+            )
+            logger.info("linkedin_capi_fired", status=resp.status_code, click_id=click_id)
+    except Exception as e:
+        logger.warning("linkedin_capi_failed", error=str(e), click_id=click_id)
+
+
+async def fire_reddit_capi(pixel_id: str, access_token: str, click_id: str, ip: str, ua: str, page_url: str):
+    """Fire PageVisit event to Reddit Conversions API"""
+    try:
+        payload = {
+            "test_mode": False,
+            "events": [{
+                "event_type": "PageVisit",
+                "event_id": click_id,
+                "event_at": f"{int(time.time())}",
+                "user": {
+                    "ip_address": hashlib.sha256(ip.encode()).hexdigest() if ip else None,
+                    "user_agent": ua,
+                },
+                "screen": {
+                    "dimensions": {}
+                },
+                "click_id": click_id,
+            }]
+        }
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"https://ads-api.reddit.com/api/v2.0/conversions/events/{pixel_id}",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            logger.info("reddit_capi_fired", status=resp.status_code, click_id=click_id)
+    except Exception as e:
+        logger.warning("reddit_capi_failed", error=str(e), click_id=click_id)
+
+
+async def fire_pinterest_capi(pixel_id: str, access_token: str, click_id: str, ip: str, ua: str, page_url: str):
+    """Fire page_visit event to Pinterest Conversions API"""
+    try:
+        payload = {
+            "data": [{
+                "event_name": "page_visit",
+                "action_source": "web",
+                "event_time": int(time.time()),
+                "event_id": click_id,
+                "event_source_url": page_url,
+                "user_data": {
+                    "client_ip_address": hashlib.sha256(ip.encode()).hexdigest() if ip else None,
+                    "client_user_agent": ua,
+                },
+            }]
+        }
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"https://api.pinterest.com/v5/ad_accounts/{pixel_id}/events",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            logger.info("pinterest_capi_fired", status=resp.status_code, click_id=click_id)
+    except Exception as e:
+        logger.warning("pinterest_capi_failed", error=str(e), click_id=click_id)
+
+
 async def fire_pixels_for_click(pixel_configs: list, click_id: str, ip: str, ua: str, destination_url: str):
     """
     Fire all configured server-side pixels for a click event.
@@ -134,6 +231,12 @@ async def fire_pixels_for_click(pixel_configs: list, click_id: str, ip: str, ua:
             tasks.append(fire_ga4_mp(config.pixel_id, config.access_token, click_id, destination_url))
         elif config.platform == "snapchat" and config.access_token:
             tasks.append(fire_snapchat_capi(config.pixel_id, config.access_token, click_id, ip, ua, destination_url))
+        elif config.platform == "linkedin" and config.access_token:
+            tasks.append(fire_linkedin_capi(config.pixel_id, config.access_token, click_id, ip, ua, destination_url))
+        elif config.platform == "reddit" and config.access_token:
+            tasks.append(fire_reddit_capi(config.pixel_id, config.access_token, click_id, ip, ua, destination_url))
+        elif config.platform == "pinterest" and config.access_token:
+            tasks.append(fire_pinterest_capi(config.pixel_id, config.access_token, click_id, ip, ua, destination_url))
 
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)

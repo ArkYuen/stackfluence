@@ -215,6 +215,10 @@ async def pixel_fire_page(
                     snaptr('init', '{config.pixel_id}');
                     snaptr('track', 'PAGE_VIEW', {{'client_dedup_id': '{click_id}'}});
                 """
+            elif config.platform == "pinterest":
+                pixel_scripts += f"""
+                    !function(e,t,n,s,i){{if(!e[s]){{e[s]=[];e[s].sharedData={{}}}}var a=t.createElement(n);a.src="https://s.pinimg.com/ct/core.js",a.async=!0,a.crossOrigin="use-credentials";var r=t.getElementsByTagName(n)[0];r.parentNode.insertBefore(a,r);a.onload=function(){{pintrk('load','{config.pixel_id}',{{save_to_localstorage:false}});pintrk('page');pintrk('track','pagevisit',{{event_id:'{click_id}'}})}}}}(window,document,'script','pintrk');
+                """
 
     # Wrap non-GA4 scripts in a single script tag
     # GA4 scripts already have their own tags

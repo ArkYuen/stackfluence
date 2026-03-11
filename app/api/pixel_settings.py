@@ -14,7 +14,7 @@ from app.middleware.auth import AuthContext, require_auth, enforce_org_scope
 
 router = APIRouter(prefix="/v1/pixels", tags=["pixel-settings"])
 
-VALID_PLATFORMS = {"meta", "tiktok", "ga4", "google_ads", "snapchat"}
+VALID_PLATFORMS = {"meta", "tiktok", "ga4", "google_ads", "snapchat", "linkedin", "reddit", "pinterest"}
 
 
 class PixelConfigCreate(BaseModel):
