@@ -69,6 +69,10 @@ class IdentifyPayload(BaseModel):
     organization_id: str
     external_customer_id: str | None = None
     email_hash: str | None = None
+    uid2_token: str | None = None
+    ramp_id: str | None = None
+    ramp_envelope: str | None = None
+    id5_id: str | None = None
 
 
 @router.post("/events/identify", status_code=201)
@@ -80,6 +84,7 @@ async def identify_user(
     rate_limit_api_key(str(auth.key_id))
 
     from uuid import UUID
+    from app.models.tables import UniversalEvent
     try:
         org_id = UUID(payload.organization_id)
     except ValueError:
@@ -91,12 +96,35 @@ async def identify_user(
     if click is None:
         return {"status": "error", "detail": "Invalid click ID"}
 
+    # Store identity signals in universal_events table
+    identity_data = {}
+    if payload.external_customer_id: identity_data["external_customer_id"] = payload.external_customer_id
+    if payload.email_hash: identity_data["hashed_email"] = payload.email_hash
+    if payload.uid2_token: identity_data["uid2_token"] = payload.uid2_token
+    if payload.ramp_id: identity_data["ramp_id"] = payload.ramp_id
+    if payload.ramp_envelope: identity_data["ramp_envelope"] = payload.ramp_envelope
+    if payload.id5_id: identity_data["id5_id"] = payload.id5_id
+
+    if identity_data:
+        event = UniversalEvent(
+            click_id=payload.inf_click_id,
+            organization_id=payload.organization_id,
+            event_type="identify",
+            event_source="api_identify",
+            event_data=identity_data,
+        )
+        db.add(event)
+        await db.commit()
+
     logger.info(
         "identify_event",
         click_id=payload.inf_click_id,
         org=payload.organization_id,
         has_customer_id=bool(payload.external_customer_id),
         has_email_hash=bool(payload.email_hash),
+        has_uid2=bool(payload.uid2_token),
+        has_ramp_id=bool(payload.ramp_id),
+        has_id5=bool(payload.id5_id),
     )
 
     return {"status": "ok", "event_type": "identify"}

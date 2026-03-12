@@ -670,6 +670,43 @@
 
   function processDataLayerEntry(entry) {
     if (!entry || typeof entry !== "object") return;
+
+    // ── Identity signal capture — passive, always-on ──────────────────────────
+    // Captures UID2, RampID, hashed PII if present in any dataLayer push
+    (function captureIdentityFromEntry(entry) {
+      var id = {};
+      // UID2 token patterns
+      if (entry.uid2)              id.uid2_token    = entry.uid2;
+      if (entry.uid2_token)        id.uid2_token    = entry.uid2_token;
+      if (entry.__uid2)            id.uid2_token    = entry.__uid2;
+      // LiveRamp RampID patterns
+      if (entry.ramp_id)           id.ramp_id       = entry.ramp_id;
+      if (entry.liveramp_id)       id.ramp_id       = entry.liveramp_id;
+      if (entry.envelope)          id.ramp_envelope = entry.envelope;
+      // Hashed PII (SHA-256) — standard GTM variable names
+      if (entry.em)                id.hashed_email  = entry.em;
+      if (entry.hashed_email)      id.hashed_email  = entry.hashed_email;
+      if (entry.ph)                id.hashed_phone  = entry.ph;
+      if (entry.hashed_phone)      id.hashed_phone  = entry.hashed_phone;
+      // External customer ID
+      if (entry.customer_id)       id.external_id   = entry.customer_id;
+      if (entry.user_id)           id.external_id   = entry.user_id;
+      if (entry.external_id)       id.external_id   = entry.external_id;
+
+      if (Object.keys(id).length > 0) {
+        sendEvent("identity_signal", "datalayer_passive", id,
+          "id:" + (id.uid2_token || id.ramp_id || id.hashed_email || id.external_id || "unknown"));
+        if (CLICK_ID && (id.hashed_email || id.external_id)) {
+          sendLegacy("/v1/events/identify", {
+            email_hash: id.hashed_email || null,
+            external_customer_id: id.external_id || null,
+            uid2_token: id.uid2_token || null,
+            ramp_id: id.ramp_id || null,
+          });
+        }
+      }
+    })(entry);
+
     var eventName = entry.event;
     if (!eventName) return;
 
@@ -753,6 +790,87 @@
   }
 
   interceptDataLayer();
+
+  function probeIdentitySignals() {
+    var id = {};
+
+    // UID2 — The Trade Desk standard
+    try {
+      if (window.__uid2 && window.__uid2.getAdvertisingToken) {
+        var token = window.__uid2.getAdvertisingToken();
+        if (token) id.uid2_token = token;
+      }
+      if (window.__uid2 && typeof window.__uid2 === "string") {
+        id.uid2_token = window.__uid2;
+      }
+    } catch(e) {}
+
+    // LiveRamp ATS (Authenticated Traffic Solution)
+    try {
+      if (window.liveramp && window.liveramp.getEnvelope) {
+        id.ramp_envelope = window.liveramp.getEnvelope();
+      }
+      if (window.__ats && window.__ats.retrieveEnvelope) {
+        id.ramp_envelope = window.__ats.retrieveEnvelope();
+      }
+    } catch(e) {}
+
+    // Prebid.js user ID modules (header bidding — used by large publishers)
+    try {
+      if (window.pbjs && window.pbjs.getUserIdsAsEids) {
+        var eids = window.pbjs.getUserIdsAsEids();
+        if (Array.isArray(eids)) {
+          eids.forEach(function(eid) {
+            if (eid.source === "uidapi.com" && eid.uids && eid.uids[0])        id.uid2_token = eid.uids[0].id;
+            if (eid.source === "liveramp.com" && eid.uids && eid.uids[0])     id.ramp_id    = eid.uids[0].id;
+            if (eid.source === "id5-sync.com" && eid.uids && eid.uids[0])     id.id5_id     = eid.uids[0].id;
+          });
+        }
+      }
+    } catch(e) {}
+
+    // Google encrypted signals (PAIR protocol)
+    try {
+      if (window.google_tag_data && window.google_tag_data.uach) {
+        id.uach_hint = JSON.stringify(window.google_tag_data.uach).substring(0, 200);
+      }
+    } catch(e) {}
+
+    if (Object.keys(id).length > 0) {
+      sendEvent("identity_signal", "window_probe", id,
+        "idprobe:" + window.location.hostname);
+      if (CLICK_ID) {
+        sendLegacy("/v1/events/identify", {
+          uid2_token: id.uid2_token || null,
+          ramp_id: id.ramp_id || null,
+          ramp_envelope: id.ramp_envelope || null,
+          email_hash: id.hashed_email || null,
+          external_customer_id: id.external_id || null,
+        });
+      }
+    }
+  }
+
+  // UID2 SDK async callback — fires when token becomes available asynchronously
+  try {
+    if (window.__uid2) {
+      window.__uid2.callbacks = window.__uid2.callbacks || [];
+      window.__uid2.callbacks.push(function(eventType, payload) {
+        if (eventType === "SdkLoaded" || eventType === "IdentityUpdated") {
+          try {
+            var token = payload && payload.identity && payload.identity.advertising_token;
+            if (token) {
+              sendEvent("identity_signal", "uid2_sdk_callback", { uid2_token: token },
+                "uid2cb:" + window.location.hostname);
+              if (CLICK_ID) {
+                sendLegacy("/v1/events/identify", { uid2_token: token });
+              }
+            }
+          } catch(e) {}
+        }
+      });
+    }
+  } catch(e) {}
 
   // Shopify-specific hooks
   function interceptShopify() {
@@ -996,6 +1114,7 @@
     detectThirdPartyTools();
     trackChatWidgets();
     trackBookingWidgets();
+    probeIdentitySignals();
   }
 
   if (document.readyState === "loading") {
@@ -1011,6 +1130,12 @@
       trackChatWidgets();
       trackBookingWidgets();
     }, 3000);
+  });
+
+  // Probe identity signals after load — some UID2 integrations resolve asynchronously
+  window.addEventListener("load", function () {
+    setTimeout(probeIdentitySignals, 2000);
+    setTimeout(probeIdentitySignals, 5000);
   });
 
   // =========================================================================
