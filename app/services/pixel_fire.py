@@ -1,7 +1,7 @@
 """
 Server-side pixel firing service.
 Fires events to Meta CAPI, TikTok Events API, GA4 Measurement Protocol,
-Google Ads, and Snapchat CAPI.
+Google Ads, Snapchat, LinkedIn, Reddit, and Pinterest CAPI.
 
 All fires are non-blocking — failures are logged but never raise.
 Deduplication: event_id = click_id (same value used in browser pixel)
@@ -9,8 +9,15 @@ Deduplication: event_id = click_id (same value used in browser pixel)
 import asyncio
 import hashlib
 import time
+from datetime import datetime, timezone
+
 import httpx
 import structlog
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.encryption import decrypt_token
+from app.models.platform_connection import PlatformConnection
 
 logger = structlog.get_logger()
 
@@ -213,30 +220,60 @@ async def fire_pinterest_capi(pixel_id: str, access_token: str, click_id: str, i
         logger.warning("pinterest_capi_failed", error=str(e), click_id=click_id)
 
 
-async def fire_pixels_for_click(pixel_configs: list, click_id: str, ip: str, ua: str, destination_url: str):
+async def fire_pixels_for_click(org_id: str, click_id: str, ip: str, ua: str,
+                                destination_url: str, db: AsyncSession):
     """
     Fire all configured server-side pixels for a click event.
+    Queries PlatformConnection, decrypts tokens, fires CAPI calls.
     Called as asyncio.create_task() — non-blocking.
-    pixel_configs: list of PixelConfig ORM objects
     """
+    try:
+        result = await db.execute(
+            select(PlatformConnection).where(
+                PlatformConnection.org_id == org_id,
+                PlatformConnection.enabled == True,
+                PlatformConnection.status == "active",
+                PlatformConnection.link_id == None,
+            )
+        )
+        connections = result.scalars().all()
+    except Exception as e:
+        logger.warning("pixel_fire_query_failed", error=str(e), org_id=org_id)
+        return
+
     tasks = []
-    for config in pixel_configs:
-        if not config.enabled:
-            continue
-        if config.platform == "meta" and config.access_token:
-            tasks.append(fire_meta_capi(config.pixel_id, config.access_token, click_id, ip, ua, destination_url, config.test_event_code))
-        elif config.platform == "tiktok" and config.access_token:
-            tasks.append(fire_tiktok_capi(config.pixel_id, config.access_token, click_id, ip, ua, destination_url))
-        elif config.platform == "ga4" and config.access_token:
-            tasks.append(fire_ga4_mp(config.pixel_id, config.access_token, click_id, destination_url))
-        elif config.platform == "snapchat" and config.access_token:
-            tasks.append(fire_snapchat_capi(config.pixel_id, config.access_token, click_id, ip, ua, destination_url))
-        elif config.platform == "linkedin" and config.access_token:
-            tasks.append(fire_linkedin_capi(config.pixel_id, config.access_token, click_id, ip, ua, destination_url))
-        elif config.platform == "reddit" and config.access_token:
-            tasks.append(fire_reddit_capi(config.pixel_id, config.access_token, click_id, ip, ua, destination_url))
-        elif config.platform == "pinterest" and config.access_token:
-            tasks.append(fire_pinterest_capi(config.pixel_id, config.access_token, click_id, ip, ua, destination_url))
+    for conn in connections:
+        access_token = (
+            decrypt_token(conn.access_token_encrypted)
+            if conn.access_token_encrypted
+            else conn.platform_account_id
+        )
+        pixel_id = conn.platform_account_id
+
+        if conn.platform == "meta" and access_token:
+            tasks.append(fire_meta_capi(pixel_id, access_token, click_id, ip, ua, destination_url))
+        elif conn.platform == "tiktok" and access_token:
+            tasks.append(fire_tiktok_capi(pixel_id, access_token, click_id, ip, ua, destination_url))
+        elif conn.platform == "ga4" and conn.secondary_id:
+            tasks.append(fire_ga4_mp(pixel_id, conn.secondary_id, click_id, destination_url))
+        elif conn.platform == "snapchat" and access_token:
+            tasks.append(fire_snapchat_capi(pixel_id, access_token, click_id, ip, ua, destination_url))
+        elif conn.platform == "linkedin" and access_token:
+            tasks.append(fire_linkedin_capi(pixel_id, access_token, click_id, ip, ua, destination_url))
+        elif conn.platform == "reddit" and access_token:
+            tasks.append(fire_reddit_capi(pixel_id, access_token, click_id, ip, ua, destination_url))
+        elif conn.platform == "pinterest" and access_token:
+            tasks.append(fire_pinterest_capi(pixel_id, access_token, click_id, ip, ua, destination_url))
 
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Update event stats per connection
+    try:
+        for conn in connections:
+            conn.last_event_at = datetime.now(timezone.utc)
+            conn.last_event_status = "success"
+            conn.total_events_fired = (conn.total_events_fired or 0) + 1
+        await db.commit()
+    except Exception as e:
+        logger.warning("pixel_fire_stats_update_failed", error=str(e))

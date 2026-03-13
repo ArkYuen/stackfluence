@@ -20,6 +20,7 @@ from app.api.dashboard import router as dashboard_router
 from app.api.demo import router as demo_router
 from app.api.pixel import router as pixel_router
 from app.api.pixel_settings import router as pixel_settings_router
+from app.api.connections import router as connections_router
 from app.config import get_settings
 
 import structlog
@@ -72,6 +73,7 @@ app.include_router(dashboard_router)
 app.include_router(demo_router)
 app.include_router(pixel_router)
 app.include_router(pixel_settings_router)
+app.include_router(connections_router)
 
 # --- Static files ---
 _static_dir = Path(__file__).resolve().parent.parent / "static"

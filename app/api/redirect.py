@@ -33,7 +33,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -42,7 +42,7 @@ from app.core.click_id import mint_click_id
 from app.core.referrer_intelligence import analyze_click
 from app.core.param_injection import resolve_destination, extract_platform_params
 from app.models.database import get_db
-from app.models.tables import ClickEvent, ClickEventLog, Link, PixelConfig
+from app.models.tables import ClickEvent, ClickEventLog, Link
 from app.services.pixel_fire import fire_pixels_for_click
 from app.middleware.rate_limit import rate_limit_ip, rate_limit_link, check_dedupe
 
@@ -357,24 +357,16 @@ async def redirect_click(
     await db.commit()
 
     # --- Fire server-side pixels (non-blocking) ---
-    pixel_stmt = select(PixelConfig).where(
-        PixelConfig.organization_id == link.organization_id,
-        PixelConfig.enabled == True,
-        or_(PixelConfig.link_id == link.id, PixelConfig.link_id == None)
-    )
-    pixel_result = await db.execute(pixel_stmt)
-    pixel_configs = pixel_result.scalars().all()
-
-    if pixel_configs:
-        asyncio.create_task(
-            fire_pixels_for_click(
-                pixel_configs=pixel_configs,
-                click_id=str(click_id),
-                ip=ip,
-                ua=ua or "",
-                destination_url=final_url,
-            )
+    asyncio.create_task(
+        fire_pixels_for_click(
+            org_id=str(link.organization_id),
+            click_id=str(click_id),
+            ip=ip,
+            ua=ua or "",
+            destination_url=final_url,
+            db=db,
         )
+    )
 
     logger.info("click_received",
                 click_id=str(click_id),

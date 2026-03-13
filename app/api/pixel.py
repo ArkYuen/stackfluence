@@ -15,7 +15,8 @@ from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import get_db
-from app.models.tables import PixelConfig, ClickEvent
+from app.models.tables import ClickEvent
+from app.models.platform_connection import PlatformConnection
 from app.middleware.auth import AuthContext, require_auth, enforce_org_scope
 from app.middleware.rate_limit import rate_limit_api_key
 from app.core.click_id import verify_click_id
@@ -193,10 +194,11 @@ async def pixel_fire_page(
     pixel_scripts = ""
 
     if click:
-        pixel_stmt = select(PixelConfig).where(
-            PixelConfig.organization_id == click.organization_id,
-            PixelConfig.enabled == True,
-            or_(PixelConfig.link_id == click.link_id, PixelConfig.link_id == None)
+        pixel_stmt = select(PlatformConnection).where(
+            PlatformConnection.org_id == click.organization_id,
+            PlatformConnection.enabled == True,
+            PlatformConnection.status == "active",
+            or_(PlatformConnection.link_id == click.link_id, PlatformConnection.link_id == None)
         )
         pixel_result = await db.execute(pixel_stmt)
         configs = pixel_result.scalars().all()
@@ -209,26 +211,26 @@ async def pixel_fire_page(
                     n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
                     t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}}(window,
                     document,'script','https://connect.facebook.net/en_US/fbevents.js');
-                    fbq('init', '{config.pixel_id}');
+                    fbq('init', '{config.platform_account_id}');
                     fbq('track', 'ViewContent', {{}}, {{eventID: '{click_id}'}});
                 """
             elif config.platform == "tiktok":
                 pixel_scripts += f"""
                     !function (w, d, t) {{
                       w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie"],ttq.setAndDefer=function(t,e){{t[e]=function(){{t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}}}; for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.instance=function(t){{for(var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n]);return e}},ttq.load=function(e,n){{var i="https://analytics.tiktok.com/i18n/pixel/events.js";ttq._i=ttq._i||{{}},ttq._i[e]=[],ttq._i[e]._u=i,ttq._t=ttq._t||{{}},ttq._t[e]=+new Date,ttq._o=ttq._o||{{}},ttq._o[e]=n||{{}};var o=document.createElement("script");o.type="text/javascript",o.async=!0,o.src=i+"?sdkid="+e+"&lib="+t;var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(o,a)}};
-                      ttq.load('{config.pixel_id}');
+                      ttq.load('{config.platform_account_id}');
                       ttq.page();
                       ttq.track('ClickButton', {{}}, {{event_id: '{click_id}'}});
                     }}(window, document, 'ttq');
                 """
             elif config.platform == "ga4":
                 pixel_scripts += f"""
-                    <script async src="https://www.googletagmanager.com/gtag/js?id={config.pixel_id}"></script>
+                    <script async src="https://www.googletagmanager.com/gtag/js?id={config.platform_account_id}"></script>
                     <script>
                     window.dataLayer = window.dataLayer || [];
                     function gtag(){{dataLayer.push(arguments);}}
                     gtag('js', new Date());
-                    gtag('config', '{config.pixel_id}');
+                    gtag('config', '{config.platform_account_id}');
                     gtag('event', 'influencer_click', {{'click_id': '{click_id}'}});
                     </script>
                 """
@@ -240,12 +242,12 @@ async def pixel_fire_page(
                     r.src=n;var u=t.getElementsByTagName(s)[0];
                     u.parentNode.insertBefore(r,u);}})(window,document,
                     'https://sc-static.net/scevent.min.js');
-                    snaptr('init', '{config.pixel_id}');
+                    snaptr('init', '{config.platform_account_id}');
                     snaptr('track', 'PAGE_VIEW', {{'client_dedup_id': '{click_id}'}});
                 """
             elif config.platform == "pinterest":
                 pixel_scripts += f"""
-                    !function(e,t,n,s,i){{if(!e[s]){{e[s]=[];e[s].sharedData={{}}}}var a=t.createElement(n);a.src="https://s.pinimg.com/ct/core.js",a.async=!0,a.crossOrigin="use-credentials";var r=t.getElementsByTagName(n)[0];r.parentNode.insertBefore(a,r);a.onload=function(){{pintrk('load','{config.pixel_id}',{{save_to_localstorage:false}});pintrk('page');pintrk('track','pagevisit',{{event_id:'{click_id}'}})}}}}(window,document,'script','pintrk');
+                    !function(e,t,n,s,i){{if(!e[s]){{e[s]=[];e[s].sharedData={{}}}}var a=t.createElement(n);a.src="https://s.pinimg.com/ct/core.js",a.async=!0,a.crossOrigin="use-credentials";var r=t.getElementsByTagName(n)[0];r.parentNode.insertBefore(a,r);a.onload=function(){{pintrk('load','{config.platform_account_id}',{{save_to_localstorage:false}});pintrk('page');pintrk('track','pagevisit',{{event_id:'{click_id}'}})}}}}(window,document,'script','pintrk');
                 """
 
     # Wrap non-GA4 scripts in a single script tag

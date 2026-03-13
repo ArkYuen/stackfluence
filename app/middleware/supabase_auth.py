@@ -115,3 +115,23 @@ async def require_supabase_auth(
         supabase_id=user.supabase_id,
         email=user.email,
     )
+
+
+async def require_org_member(
+    request: Request, db: AsyncSession = Depends(get_db)
+) -> SupabaseAuthContext:
+    """Validates the caller is an authenticated member of some org."""
+    return await require_supabase_auth(request, db)
+
+
+def require_org_role(roles: list[str]):
+    """
+    Factory that returns a dependency checking the caller has one of the given roles.
+    Currently all authenticated users are treated as org owners (single-user orgs).
+    Extend with proper RBAC when org_members table is added.
+    """
+    async def _dep(
+        request: Request, db: AsyncSession = Depends(get_db)
+    ) -> SupabaseAuthContext:
+        return await require_supabase_auth(request, db)
+    return _dep
